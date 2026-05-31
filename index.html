@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest Lab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.5.0/Recharts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #07090f; color: #e6edf3; font-family: 'IBM Plex Mono', monospace; min-height: 100vh; }
+select { appearance: none; -webkit-appearance: none; width: 100%; }
+button { font-family: 'IBM Plex Mono', monospace; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #1c2433; border-radius: 2px; }
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { color: #00ff9d !important; }
+</style>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#00ff9d;font-family:monospace;">Loading...</div></div>
+<script type="text/babel">
+
+const { useState, useCallback, useMemo } = React;
+const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, BarChart, Bar } = Recharts;
+
+const API = "https://web-production-6c4d6.up.railway.app";
+
+const C = {
+  bg:"#07090f", surface:"#0d1117", card:"#111820", border:"#1c2433",
+  accent:"#00ff9d", accentDim:"#00ff9d15", red:"#ff4466", redDim:"#ff446615",
+  gold:"#ffd666", goldDim:"#ffd66615", blue:"#3b8bff", blueDim:"#3b8bff15",
+  text:"#e6edf3", muted:"#6e7681", dim:"#21262d",
+};
+
+const ALL_PAIRS      = ["INJ/USDT","BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT"];
+const ALL_TIMEFRAMES = ["1h","4h","1d"];
+const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
+const ALL_PIVOTS     = [3,5,8];
+const ALL_RR         = [1.5,2,3,4];
+const PERIODS        = [
+  { label:"2025 Full",  start:"2025-01-01", end:"2026-01-01" },
+  { label:"2026 YTD",   start:"2026-01-01", end:"now" },
+  { label:"Rolling 1Y", start:null,         end:"now" },
+];
+const RISK_LABELS = { fixed:"Fixed 2%", half_kelly:"Half Kelly", full_kelly:"Full Kelly" };
+
+const fmt     = (n,d=2) => Number(n).toFixed(d);
+const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"});
+const fmtRisk = (r) => RISK_LABELS[r]||r;
+
+// ── SHARED ────────────────────────────────────────────────
+function StatCard({label,value,sub,color}){
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px"}}>
+      <div style={{fontSize:9,color:C.muted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:4}}>{label}</div>
+      <div style={{fontSize:18,fontWeight:800,color:color||C.text,letterSpacing:"-0.02em"}}>{value}</div>
+      {sub&&<div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>}
+    </div>
+  );
+}
+
+function Sel({label,value,onChange,options}){
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>{label}</span>
+      <select value={value} onChange={e=>onChange(e.target.value)} style={{
+        background:C.card,color:C.text,border:`1px solid ${C.border}`,
+        borderRadius:6,padding:"8px 10px",fontSize:12,cursor:"pointer",outline:"none"
+      }}>
+        {options.map(o=><option key={o.value||o} value={o.value||o}>{o.label||o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function Toggle({label,value,onChange}){
+  return (
+    <div onClick={()=>onChange(!value)} style={{
+      background:value?C.accentDim:C.card,
+      border:`1px solid ${value?C.accent:C.border}`,
+      borderRadius:6,padding:"6px 10px",cursor:"pointer",
+      display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"
+    }}>
+      <div style={{width:7,height:7,borderRadius:"50%",background:value?C.accent:C.muted,flexShrink:0}}/>
+      <span style={{fontSize:11,color:value?C.accent:C.muted}}>{label}</span>
+    </div>
+  );
+}
+
+function ProgressBar({value,total}){
+  const pct = total ? (value/total*100) : 0;
+  return (
+    <div style={{marginTop:10,background:C.dim,borderRadius:4,height:4}}>
+      <div style={{background:C.accent,height:4,borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
+    </div>
+  );
+}
+
+const EqTip = ({active,payload}) => {
+  if(!active||!payload?.length) return null;
+  return (
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",fontSize:11}}>
+      <div style={{color:C.muted}}>{fmtDate(payload[0].payload.t)}</div>
+      <div style={{color:C.accent,fontWeight:700}}>${fmt(payload[0].payload.eq)}</div>
+    </div>
+  );
+};
+
+function toggle(arr,val){ return arr.includes(val)?arr.filter(x=>x!==val):[...arr,val]; }
+
+// ── SINGLE TAB ────────────────────────────────────────────
+function SingleTab(){
+  const [symbol,setSymbol]   = useState("INJ/USDT");
+  const [tf,setTf]           = useState("4h");
+  const [period,setPeriod]   = useState(0);
+  const [risk,setRisk]       = useState("fixed");
+  const [pivotN,setPivotN]   = useState(5);
+  const [rr,setRr]           = useState(2);
+  const [status,setStatus]   = useState("idle");
+  const [result,setResult]   = useState(null);
+  const [error,setError]     = useState("");
+  const [tab,setTab]         = useState("curve");
+
+  const run = useCallback(async()=>{
+    setStatus("loading"); setResult(null); setError("");
+    try{
+      const p=PERIODS[period];
+      let start=p.start;
+      if(!start){const d=new Date();d.setFullYear(d.getFullYear()-1);start=d.toISOString().split("T")[0];}
+      const res=await fetch(`${API}/backtest`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({symbol,timeframe:tf,start_date:start,end_date:p.end,pivot_n:pivotN,risk_method:risk,risk_pct:0.02,rr})});
+      const data=await res.json();
+      if(!data.success) throw new Error(data.error);
+      setResult(data); setStatus("done");
+    }catch(e){setError(e.message);setStatus("error");}
+  },[symbol,tf,period,risk,pivotN,rr]);
+
+  const s=result?.stats, green=s&&s.total_return>=0, col=green?C.accent:C.red;
+
+  return (
+    <div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:20}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <Sel label="Pair"      value={symbol}  onChange={setSymbol}       options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
+          <Sel label="Timeframe" value={tf}      onChange={setTf}           options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
+          <Sel label="Period"    value={period}  onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
+          <Sel label="Pivot N"   value={pivotN}  onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk:Reward Ratio</span>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {ALL_RR.map(r=>(
+              <div key={r} onClick={()=>setRr(r)} style={{
+                background:rr===r?C.accentDim:C.card,border:`1px solid ${rr===r?C.accent:C.border}`,
+                borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
+                color:rr===r?C.accent:C.text,fontWeight:rr===r?700:400
+              }}>{r}R</div>
+            ))}
+          </div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk Method</span>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            {[{value:"fixed",label:"Fixed 2%",desc:"Safe"},{value:"half_kelly",label:"Half Kelly",desc:"Balanced"},{value:"full_kelly",label:"Full Kelly",desc:"Max"}].map(m=>(
+              <div key={m.value} onClick={()=>setRisk(m.value)} style={{
+                background:risk===m.value?C.accentDim:C.card,
+                border:`1px solid ${risk===m.value?C.accent:C.border}`,
+                borderRadius:8,padding:"10px 8px",cursor:"pointer"
+              }}>
+                <div style={{fontSize:11,fontWeight:700,color:risk===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
+                <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button onClick={run} disabled={status==="loading"} style={{
+          background:status==="loading"?C.dim:C.accent,color:C.bg,border:"none",
+          borderRadius:8,padding:12,fontSize:13,fontWeight:800,
+          cursor:status==="loading"?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
+        }}>{status==="loading"?"⟳ RUNNING...":"▶ RUN BACKTEST"}</button>
+        {status==="error"&&<div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8}}>✗ {error}</div>}
+      </div>
+
+      {status==="done"&&result&&s&&(
+        <div>
+          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>DATA: {result.source}</span>
+            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>RISK: {result.risk_pct}%</span>
+            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R</span>
+          </div>
+          <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>TOTAL RETURN</div>
+              <div style={{fontSize:40,fontWeight:800,color:col,lineHeight:1}}>{green?"+":""}{fmt(s.total_return)}%</div>
+            </div>
+            <div style={{flex:1,minWidth:180}}>
+              <div style={{fontSize:13,marginBottom:4}}>$100 → <strong style={{color:col}}>${fmt(s.final_equity)}</strong></div>
+              <div style={{fontSize:11,color:C.muted}}>{s.total_trades} trades · {s.wins}W / {s.losses}L · {fmt(s.win_rate)}% WR</div>
+              <div style={{fontSize:11,color:C.muted}}>CAGR {fmt(s.cagr)}% · Max DD -{fmt(s.max_drawdown)}% · Sharpe {fmt(s.sharpe)}</div>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
+            <StatCard label="Final Equity"  value={`$${fmt(s.final_equity)}`}   color={col}/>
+            <StatCard label="CAGR"          value={`${fmt(s.cagr)}%`}           color={C.gold} sub="annualised"/>
+            <StatCard label="Daily Avg"     value={`${fmt(s.daily_return,3)}%`}/>
+            <StatCard label="Win Rate"      value={`${fmt(s.win_rate)}%`}       sub={`${s.wins}W / ${s.losses}L`}/>
+            <StatCard label="Profit Factor" value={fmt(s.profit_factor)}        color={s.profit_factor>=1.5?C.accent:C.red}/>
+            <StatCard label="Max Drawdown"  value={`-${fmt(s.max_drawdown)}%`}  color={C.red}/>
+            <StatCard label="Sharpe"        value={fmt(s.sharpe)}               color={s.sharpe>=1?C.accent:C.muted}/>
+            <StatCard label="Max Consec W"  value={s.max_consec_wins}           color={C.accent}/>
+            <StatCard label="Max Consec L"  value={s.max_consec_losses}         color={C.red}/>
+            <StatCard label="Avg Win $"     value={`$${fmt(s.avg_win,3)}`}      color={C.accent}/>
+            <StatCard label="Avg Loss $"    value={`$${fmt(s.avg_loss,3)}`}     color={C.red}/>
+            <StatCard label="Kelly Full"    value={`${fmt(s.kelly_full*100,1)}%`} color={C.gold} sub="optimal risk"/>
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{display:"flex",borderBottom:`1px solid ${C.border}`}}>
+              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setTab(id)} style={{
+                  flex:1,padding:"10px 8px",background:tab===id?C.card:"transparent",
+                  color:tab===id?C.accent:C.muted,border:"none",
+                  borderBottom:tab===id?`2px solid ${C.accent}`:"2px solid transparent",
+                  fontSize:10,cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
+                }}>{label}</button>
+              ))}
+            </div>
+            <div style={{padding:"16px 8px"}}>
+              {tab==="curve"&&(
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={result.equity_curve} margin={{top:4,right:4,left:0,bottom:0}}>
+                    <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={col} stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor={col} stopOpacity={0}/>
+                    </linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                    <XAxis dataKey="t" tickFormatter={fmtDate} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={44}/>
+                    <Tooltip content={<EqTip/>}/>
+                    <ReferenceLine y={100} stroke={C.muted} strokeDasharray="4 4"/>
+                    <Area type="monotone" dataKey="eq" stroke={col} strokeWidth={2} fill="url(#grad)" dot={false}/>
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+              {tab==="dd"&&(
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={result.equity_curve.map((d,i,arr)=>{
+                    const peak=Math.max(...arr.slice(0,i+1).map(x=>x.eq));
+                    return{t:d.t,dd:-((peak-d.eq)/peak*100)};
+                  })} margin={{top:4,right:4,left:0,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                    <XAxis dataKey="t" tickFormatter={fmtDate} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>v.toFixed(0)+"%"} width={40}/>
+                    <Tooltip formatter={v=>fmt(v)+"%"} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                    <Area type="monotone" dataKey="dd" stroke={C.red} strokeWidth={1.5} fill={C.redDim} dot={false}/>
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+              {tab==="pnl"&&(
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={result.trades} margin={{top:4,right:4,left:0,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                    <XAxis dataKey="id" tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false}/>
+                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
+                    <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                    <ReferenceLine y={0} stroke={C.muted}/>
+                    <Bar dataKey="pnl" fill={C.accent} radius={[2,2,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
+            <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
+              Trade Log · Last {result.trades.length} trades
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr style={{background:C.bg}}>
+                  {["#","Dir","Date","Entry","SL","TP","Exit","Result","PnL","Equity"].map(h=>(
+                    <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {[...result.trades].reverse().map(t=>(
+                    <tr key={t.id} style={{borderTop:`1px solid ${C.border}`}}>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{t.id}</td>
+                      <td style={{padding:"6px 10px"}}>
+                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
+                      </td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{new Date(t.entry_time).toLocaleDateString()}</td>
+                      <td style={{padding:"6px 10px"}}>{t.entry}</td>
+                      <td style={{padding:"6px 10px",color:C.red}}>{t.sl}</td>
+                      <td style={{padding:"6px 10px",color:C.accent}}>{t.tp}</td>
+                      <td style={{padding:"6px 10px"}}>{t.exit_price}</td>
+                      <td style={{padding:"6px 10px",color:t.result==="TP"?C.accent:C.red,fontWeight:700}}>{t.result}</td>
+                      <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red}}>{t.pnl>=0?"+":""}{fmt(t.pnl)}</td>
+                      <td style={{padding:"6px 10px"}}>${fmt(t.equity)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Configure above and hit <span style={{color:C.accent}}>▶ RUN BACKTEST</span></div>}
+    </div>
+  );
+}
+
+// ── MATRIX TAB ────────────────────────────────────────────
+function MatrixTab(){
+  const [selPairs,  setSelPairs]  = useState(["INJ/USDT","BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT"]);
+  const [selTfs,    setSelTfs]    = useState(["4h"]);
+  const [selRisks,  setSelRisks]  = useState(["fixed","half_kelly","full_kelly"]);
+  const [selPivots, setSelPivots] = useState([5]);
+  const [selRR,     setSelRR]     = useState([2]);
+  const [period,    setPeriod]    = useState(0);
+  const [status,    setStatus]    = useState("idle");
+  const [results,   setResults]   = useState([]);
+  const [progress,  setProgress]  = useState(0);
+  const [total,     setTotal]     = useState(0);
+  const [sortKey,   setSortKey]   = useState("total_return");
+  const [sortDir,   setSortDir]   = useState("desc");
+  const [error,     setError]     = useState("");
+
+  const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
+  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length;
+
+  const run=useCallback(async()=>{
+    if(!totalCombos) return;
+    setStatus("loading"); setResults([]); setProgress(0); setError("");
+    const p=PERIODS[period];
+    let start=p.start;
+    if(!start){const d=new Date();d.setFullYear(d.getFullYear()-1);start=d.toISOString().split("T")[0];}
+    const configs=[];
+    for(const sym of selPairs) for(const tf of selTfs) for(const risk of selRisks)
+      for(const pn of selPivots) for(const rr of selRR)
+        configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:p.end,pivot_n:pn,risk_method:risk,risk_pct:0.02,rr});
+    setTotal(configs.length);
+    const allResults=[];
+    for(let i=0;i<configs.length;i+=8){
+      const batch=configs.slice(i,i+8);
+      try{
+        const res=await fetch(`${API}/batch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configs:batch})});
+        const data=await res.json();
+        if(data.success){allResults.push(...data.results);setProgress(allResults.length);setResults([...allResults]);}
+      }catch(e){setError(e.message);}
+    }
+    setStatus("done");
+  },[selPairs,selTfs,selRisks,selPivots,selRR,period,totalCombos]);
+
+  const sorted=useMemo(()=>{
+    const ok=results.filter(r=>r.success&&r.stats);
+    return [...ok].sort((a,b)=>{
+      const va=a.stats[sortKey]??0, vb=b.stats[sortKey]??0;
+      return sortDir==="desc"?vb-va:va-vb;
+    });
+  },[results,sortKey,sortDir]);
+
+  const handleSort=(k)=>{if(sortKey===k)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortKey(k);setSortDir("desc");}};
+  const SortTh=({k,label})=>(
+    <th className="sortable" onClick={()=>handleSort(k)} style={{padding:"8px 10px",color:sortKey===k?C.accent:C.muted,textAlign:"right",fontWeight:400,whiteSpace:"nowrap",fontSize:9,letterSpacing:"0.06em"}}>
+      {label}{sortKey===k?(sortDir==="desc"?" ↓":" ↑"):""}
+    </th>
+  );
+
+  return (
+    <div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        {[
+          ["Pairs", ALL_PAIRS, selPairs, setSelPairs, p=>p.replace("/USDT","")],
+          ["Timeframes", ALL_TIMEFRAMES, selTfs, setSelTfs, t=>t.toUpperCase()],
+          ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
+          ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
+          ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
+        ].map(([label,all,sel,setSel,fmt])=>(
+          <div key={label} style={{marginBottom:14}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {all.map(v=><Toggle key={v} label={fmt(v)} value={sel.includes(v)} onChange={()=>tog(sel,setSel,v)}/>)}
+            </div>
+          </div>
+        ))}
+        <div style={{marginBottom:14}}>
+          <Sel label="Period" value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
+        </div>
+        <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
+          background:status==="loading"||!totalCombos?C.dim:C.accent,color:C.bg,border:"none",
+          borderRadius:8,padding:"12px 20px",fontSize:13,fontWeight:800,
+          cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
+        }}>{status==="loading"?`⟳ ${progress}/${total} running...`:`▶ RUN MATRIX (${totalCombos} combos)`}</button>
+        {status==="loading"&&<ProgressBar value={progress} total={total}/>}
+        {error&&<div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
+      </div>
+
+      {sorted.length>0&&(
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
+          <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>{sorted.length} combinations · tap header to sort</span>
+            {sorted[0]&&<span style={{fontSize:10,color:C.accent}}>Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} {fmtRisk(sorted[0].risk_method)} N={sorted[0].pivot_n} {sorted[0].rr}R</span>}
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+              <thead><tr style={{background:C.bg}}>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Pair</th>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>TF</th>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
+                <SortTh k="total_return" label="Return %"/>
+                <SortTh k="cagr" label="CAGR %"/>
+                <SortTh k="max_drawdown" label="Max DD %"/>
+                <SortTh k="sharpe" label="Sharpe"/>
+                <SortTh k="profit_factor" label="PF"/>
+                <SortTh k="win_rate" label="WR %"/>
+                <SortTh k="total_trades" label="Trades"/>
+              </tr></thead>
+              <tbody>
+                {sorted.map((r,i)=>{
+                  const s=r.stats, isTop=i===0, g=s.total_return>=0;
+                  return (
+                    <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:isTop?C.accentDim:"transparent"}}>
+                      <td style={{padding:"6px 10px",fontWeight:isTop?700:400,color:isTop?C.accent:C.text}}>{r.symbol.replace("/USDT","")}</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{r.timeframe?.toUpperCase()}</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{fmtRisk(r.risk_method)}</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{r.pivot_n}</td>
+                      <td style={{padding:"6px 10px",color:C.gold}}>{r.rr}R</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red,fontWeight:700}}>{g?"+":""}{fmt(s.total_return)}%</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt(s.cagr)}%</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.red}}>-{fmt(s.max_drawdown)}%</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:s.sharpe>=1?C.accent:C.muted}}>{fmt(s.sharpe)}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:s.profit_factor>=1.5?C.accent:C.red}}>{fmt(s.profit_factor)}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right"}}>{fmt(s.win_rate)}%</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{s.total_trades}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select variables and hit <span style={{color:C.accent}}>▶ RUN MATRIX</span></div>}
+    </div>
+  );
+}
+
+// ── COMPARE TAB ───────────────────────────────────────────
+function CompareTab(){
+  const [selPairs,  setSelPairs]  = useState(["ETH/USDT","BTC/USDT","INJ/USDT","SOL/USDT"]);
+  const [selTfs,    setSelTfs]    = useState(["4h"]);
+  const [selRisks,  setSelRisks]  = useState(["fixed"]);
+  const [selPivots, setSelPivots] = useState([5]);
+  const [selRR,     setSelRR]     = useState([2,3]);
+  const [periodA,   setPeriodA]   = useState({start:"2025-01-01",end:"2026-01-01",label:"2025"});
+  const [periodB,   setPeriodB]   = useState({start:"2026-01-01",end:"now",label:"2026 YTD"});
+  const [status,    setStatus]    = useState("idle");
+  const [results,   setResults]   = useState([]);
+  const [progress,  setProgress]  = useState({a:0,b:0,total:0});
+  const [sortKey,   setSortKey]   = useState("consistency_score");
+  const [sortDir,   setSortDir]   = useState("desc");
+  const [error,     setError]     = useState("");
+  const [filter,    setFilter]    = useState("all"); // all | both_positive | top20
+
+  const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
+  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length;
+
+  const run=useCallback(async()=>{
+    if(!totalCombos) return;
+    setStatus("loading"); setResults([]); setError("");
+    setProgress({a:0,b:0,total:totalCombos*2});
+    try{
+      const res=await fetch(`${API}/compare`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          symbols:selPairs,timeframes:selTfs,pivot_ns:selPivots,
+          risk_methods:selRisks,rr_ratios:selRR,
+          period_a_start:periodA.start,period_a_end:periodA.end,
+          period_b_start:periodB.start,period_b_end:periodB.end,
+        })
+      });
+      const data=await res.json();
+      if(!data.success) throw new Error(data.error||"Compare failed");
+      setResults(data.results);
+      setStatus("done");
+    }catch(e){setError(e.message);setStatus("error");}
+  },[selPairs,selTfs,selRisks,selPivots,selRR,periodA,periodB,totalCombos]);
+
+  const filtered=useMemo(()=>{
+    let r=[...results];
+    if(filter==="both_positive") r=r.filter(x=>x.both_positive);
+    if(filter==="top20") r=r.slice(0,20);
+    return [...r].sort((a,b)=>{
+      const va=a[sortKey]??0, vb=b[sortKey]??0;
+      return sortDir==="desc"?vb-va:va-vb;
+    });
+  },[results,filter,sortKey,sortDir]);
+
+  const handleSort=(k)=>{if(sortKey===k)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortKey(k);setSortDir("desc");}};
+  const SortTh=({k,label})=>(
+    <th className="sortable" onClick={()=>handleSort(k)} style={{padding:"8px 8px",color:sortKey===k?C.accent:C.muted,textAlign:"right",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>
+      {label}{sortKey===k?(sortDir==="desc"?" ↓":" ↑"):""}
+    </th>
+  );
+
+  const PERIOD_PRESETS=[
+    {label:"2025 Full", start:"2025-01-01",end:"2026-01-01"},
+    {label:"2026 YTD",  start:"2026-01-01",end:"now"},
+    {label:"2024 Full", start:"2024-01-01",end:"2025-01-01"},
+  ];
+
+  return (
+    <div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+
+        {/* Period selector */}
+        <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Period A vs Period B</span>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <div style={{fontSize:9,color:C.accent,marginBottom:6}}>PERIOD A</div>
+              {PERIOD_PRESETS.map(p=>(
+                <div key={p.label} onClick={()=>setPeriodA(p)} style={{
+                  background:periodA.label===p.label?C.accentDim:C.card,
+                  border:`1px solid ${periodA.label===p.label?C.accent:C.border}`,
+                  borderRadius:6,padding:"7px 10px",cursor:"pointer",
+                  fontSize:11,color:periodA.label===p.label?C.accent:C.muted,
+                  marginBottom:4
+                }}>{p.label}</div>
+              ))}
+            </div>
+            <div>
+              <div style={{fontSize:9,color:C.gold,marginBottom:6}}>PERIOD B</div>
+              {PERIOD_PRESETS.map(p=>(
+                <div key={p.label} onClick={()=>setPeriodB(p)} style={{
+                  background:periodB.label===p.label?C.goldDim:C.card,
+                  border:`1px solid ${periodB.label===p.label?C.gold:C.border}`,
+                  borderRadius:6,padding:"7px 10px",cursor:"pointer",
+                  fontSize:11,color:periodB.label===p.label?C.gold:C.muted,
+                  marginBottom:4
+                }}>{p.label}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Variables */}
+        {[
+          ["Pairs", ALL_PAIRS, selPairs, setSelPairs, p=>p.replace("/USDT","")],
+          ["Timeframes", ALL_TIMEFRAMES, selTfs, setSelTfs, t=>t.toUpperCase()],
+          ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
+          ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
+          ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
+        ].map(([label,all,sel,setSel,fmt])=>(
+          <div key={label} style={{marginBottom:14}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {all.map(v=><Toggle key={v} label={fmt(v)} value={sel.includes(v)} onChange={()=>tog(sel,setSel,v)}/>)}
+            </div>
+          </div>
+        ))}
+
+        <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
+          background:status==="loading"||!totalCombos?C.dim:C.gold,
+          color:C.bg,border:"none",borderRadius:8,padding:"12px 20px",
+          fontSize:13,fontWeight:800,cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",
+          letterSpacing:"0.08em",width:"100%"
+        }}>
+          {status==="loading"?"⟳ COMPARING PERIODS...`":`⚖ COMPARE ${totalCombos} COMBOS × 2 PERIODS`}
+        </button>
+        {error&&<div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
+      </div>
+
+      {/* Results */}
+      {results.length>0&&(
+        <div>
+          {/* Summary banner */}
+          {filtered[0]&&(
+            <div style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:12,padding:"14px 18px",marginBottom:16}}>
+              <div style={{fontSize:10,color:C.gold,letterSpacing:"0.1em",marginBottom:6}}>⭐ MOST CONSISTENT COMBO</div>
+              <div style={{fontSize:18,fontWeight:800,color:C.text}}>
+                {filtered[0].symbol.replace("/USDT","")} {filtered[0].timeframe?.toUpperCase()} · {fmtRisk(filtered[0].risk)} · N={filtered[0].pivot_n} · {filtered[0].rr}R
+              </div>
+              <div style={{fontSize:12,color:C.muted,marginTop:4}}>
+                {periodA.label}: <span style={{color:filtered[0].period_a_return>=0?C.accent:C.red,fontWeight:700}}>{filtered[0].period_a_return>=0?"+":""}{fmt(filtered[0].period_a_return)}%</span>
+                {" "}·{" "}
+                {periodB.label}: <span style={{color:filtered[0].period_b_return>=0?C.gold:C.red,fontWeight:700}}>{filtered[0].period_b_return>=0?"+":""}{fmt(filtered[0].period_b_return)}%</span>
+                {" "}·{" "}Consistency Score: <span style={{color:C.gold,fontWeight:700}}>{fmt(filtered[0].consistency_score)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Filter */}
+          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+            {[["all","All Results"],["both_positive","Both Positive Only"],["top20","Top 20"]].map(([v,l])=>(
+              <div key={v} onClick={()=>setFilter(v)} style={{
+                background:filter===v?C.accentDim:C.card,
+                border:`1px solid ${filter===v?C.accent:C.border}`,
+                borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:10,
+                color:filter===v?C.accent:C.muted
+              }}>{l}</div>
+            ))}
+            <div style={{marginLeft:"auto",fontSize:10,color:C.muted,alignSelf:"center"}}>{filtered.length} results</div>
+          </div>
+
+          {/* Table */}
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr style={{background:C.bg}}>
+                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Pair</th>
+                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>TF</th>
+                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
+                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
+                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
+                  <SortTh k="period_a_return" label={`${periodA.label} %`}/>
+                  <SortTh k="period_b_return" label={`${periodB.label} %`}/>
+                  <SortTh k="avg_return"      label="Avg Return"/>
+                  <SortTh k="avg_dd"          label="Avg DD %"/>
+                  <SortTh k="avg_sharpe"      label="Avg Sharpe"/>
+                  <SortTh k="consistency_score" label="Score ⭐"/>
+                </tr></thead>
+                <tbody>
+                  {filtered.map((r,i)=>{
+                    const isTop=i===0;
+                    const bothPos=r.both_positive;
+                    const rowBg=isTop?C.goldDim:bothPos?"#00ff9d08":"transparent";
+                    return (
+                      <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:rowBg}}>
+                        <td style={{padding:"6px 8px",fontWeight:isTop?700:400,color:isTop?C.gold:C.text}}>{r.symbol.replace("/USDT","")}</td>
+                        <td style={{padding:"6px 8px",color:C.muted}}>{r.timeframe?.toUpperCase()}</td>
+                        <td style={{padding:"6px 8px",color:C.muted}}>{fmtRisk(r.risk)}</td>
+                        <td style={{padding:"6px 8px",color:C.muted}}>{r.pivot_n}</td>
+                        <td style={{padding:"6px 8px",color:C.gold}}>{r.rr}R</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:r.period_a_return>=0?C.accent:C.red,fontWeight:700}}>{r.period_a_return>=0?"+":""}{fmt(r.period_a_return)}%</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:r.period_b_return>=0?C.gold:C.red,fontWeight:700}}>{r.period_b_return>=0?"+":""}{fmt(r.period_b_return)}%</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:r.avg_return>=0?C.accent:C.red}}>{r.avg_return>=0?"+":""}{fmt(r.avg_return)}%</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:C.red}}>-{fmt(r.avg_dd)}%</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:r.avg_sharpe>=1?C.accent:C.muted}}>{fmt(r.avg_sharpe)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:C.gold,fontWeight:isTop?700:400}}>{fmt(r.consistency_score)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select periods and variables, then hit <span style={{color:C.gold}}>⚖ COMPARE</span></div>}
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────
+function App(){
+  const [mainTab,setMainTab]=useState("single");
+  const tabs=[["single","Single"],["matrix","Matrix"],["compare","Compare"]];
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,padding:"20px 16px",maxWidth:900,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Fib Structure Engine</span>
+        </div>
+        <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>LH→LL→LH / HL→HH→HL · 61.8% Fib · Variable RR · Bias flip on SL</p>
+      </div>
+
+      <div style={{display:"flex",gap:0,marginBottom:20,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {tabs.map(([id,label])=>(
+          <button key={id} onClick={()=>setMainTab(id)} style={{
+            flex:1,padding:"12px 8px",
+            background:mainTab===id?C.card:"transparent",
+            color:mainTab===id?(id==="compare"?C.gold:C.accent):C.muted,
+            border:"none",
+            borderBottom:mainTab===id?`2px solid ${id==="compare"?C.gold:C.accent}`:"2px solid transparent",
+            fontSize:11,fontWeight:mainTab===id?700:400,
+            cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {mainTab==="single"&&<SingleTab/>}
+      {mainTab==="matrix"&&<MatrixTab/>}
+      {mainTab==="compare"&&<CompareTab/>}
+    </div>
+  );
+}
+
+ReactDOM.render(<App/>, document.getElementById("root"));
+</script>
+</body>
+</html>
