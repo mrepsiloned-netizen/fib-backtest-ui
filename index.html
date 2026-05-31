@@ -58,10 +58,11 @@ const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-MY",{month:"short",d
 const fmtRisk = (r) => RISK_LABELS[r]||r;
 
 function getPeriodDates(p) {
+  if (!p) return { start: "2025-01-01", end: "2026-01-01" };
   const now = new Date();
   if (p.start) return { start: p.start, end: p.end };
   if (p.days) {
-    const d = new Date(now - p.days * 86400000);
+    const d = new Date(now.getTime() - p.days * 86400000);
     return { start: d.toISOString().split("T")[0], end: "now" };
   }
   return { start: "2025-01-01", end: "now" };
