@@ -26,7 +26,7 @@ button { font-family: 'IBM Plex Mono', monospace; }
 <div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#00ff9d;font-family:monospace;">Loading...</div></div>
 <script type="text/babel">
 
-const { useState, useCallback, useMemo } = React;
+const { useState, useCallback, useMemo, useEffect } = React;
 const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, BarChart, Bar } = Recharts;
 
 const API = "https://web-production-85d80.up.railway.app";
@@ -662,10 +662,285 @@ function CompareTab(){
   );
 }
 
+
+// ── JOURNAL TAB ───────────────────────────────────────────
+function JournalTab(){
+  const [account,  setAccount]  = useState(null);
+  const [trades,   setTrades]   = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState("");
+  const [filterPair,   setFilterPair]   = useState("all");
+  const [filterTF,     setFilterTF]     = useState("all");
+  const [filterLabel,  setFilterLabel]  = useState("all");
+  const [filterResult, setFilterResult] = useState("all");
+  const [tab,      setTab]      = useState("overview");
+
+  const load = useCallback(async()=>{
+    setLoading(true); setError("");
+    try{
+      const res = await fetch(`${API}/journal`);
+      const data = await res.json();
+      if(data.success){
+        setAccount(data.account||null);
+        setTrades(Array.isArray(data.trades)?data.trades:[]);
+      } else throw new Error(data.error||"Failed");
+    }catch(e){ setError(e.message); }
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{ load(); },[]);
+
+  const pairs  = useMemo(()=>["all",...new Set(trades.map(t=>t.symbol))],[trades]);
+  const tfs    = useMemo(()=>["all",...new Set(trades.map(t=>t.timeframe))],[trades]);
+  const labels = useMemo(()=>["all",...new Set(trades.map(t=>t.label).filter(Boolean))],[trades]);
+
+  const filtered = useMemo(()=>trades.filter(t=>{
+    if(filterPair!=="all"&&t.symbol!==filterPair) return false;
+    if(filterTF!=="all"&&t.timeframe!==filterTF) return false;
+    if(filterLabel!=="all"&&t.label!==filterLabel) return false;
+    if(filterResult==="win"&&!t.won) return false;
+    if(filterResult==="loss"&&t.won) return false;
+    return true;
+  }),[trades,filterPair,filterTF,filterLabel,filterResult]);
+
+  const stats = useMemo(()=>{
+    if(!filtered.length) return null;
+    const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
+    const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
+    const wr=wins.length/filtered.length*100;
+    const avgWin=wins.length?wins.reduce((a,t)=>a+(t.pnl||0),0)/wins.length:0;
+    const avgLoss=losses.length?Math.abs(losses.reduce((a,t)=>a+(t.pnl||0),0)/losses.length):0;
+    const pf=avgLoss>0?avgWin/avgLoss:999;
+    let maxCW=0,maxCL=0,cw=0,cl=0;
+    [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
+    return{wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
+  },[filtered]);
+
+  const equityCurve = useMemo(()=>{
+    let eq=100;
+    return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
+  },[filtered]);
+
+  const pnlByPair = useMemo(()=>{
+    const map={};
+    filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
+    return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
+  },[filtered]);
+
+  const fmtDate = (s)=>s?new Date(s).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+  const acc = account;
+  const totalReturn = acc?Math.round(((acc.balance-100)/100*100)*100)/100:0;
+  const green = totalReturn>=0;
+  const col = green?C.accent:C.red;
+  const sel2 = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
+
+  if(loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading journal...</div>;
+  if(error) return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
+
+  return (
+    <div>
+      {/* Account Banner */}
+      {acc?(
+        <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>ACCOUNT BALANCE</div>
+            <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(acc.balance)}</div>
+          </div>
+          <div style={{flex:1,minWidth:180}}>
+            <div style={{fontSize:13,marginBottom:4}}>Total Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
+            <div style={{fontSize:11,color:C.muted}}>{acc.total_trades} trades · {acc.wins}W / {acc.losses}L · Max DD -{fmt(acc.max_drawdown)}%</div>
+          </div>
+          <button onClick={load} style={{background:C.card,color:C.accent,border:`1px solid ${C.accent}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
+        </div>
+      ):(
+        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>
+          No paper trades yet — waiting for first signal 🤖
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:16}}>
+        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {[
+            ["Pair", filterPair, setFilterPair, pairs, p=>p==="all"?"All Pairs":p],
+            ["Timeframe", filterTF, setFilterTF, tfs, t=>t==="all"?"All TF":t.toUpperCase()],
+            ["Strategy", filterLabel, setFilterLabel, labels, l=>l==="all"?"All":l],
+            ["Result", filterResult, setFilterResult, ["all","win","loss"], r=>r==="all"?"All Results":r==="win"?"Wins Only":"Losses Only"],
+          ].map(([label,val,setVal,opts,fmtOpt])=>(
+            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
+              <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
+              <select value={val} onChange={e=>setVal(e.target.value)} style={sel2}>
+                {opts.map(o=><option key={o} value={o}>{fmtOpt(o)}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Sub tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:16,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {[["overview","Overview"],["chart","Equity"],["breakdown","By Pair"],["trades","Trade Log"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{
+            flex:1,padding:"10px 4px",background:tab===id?C.card:"transparent",
+            color:tab===id?C.accent:C.muted,border:"none",
+            borderBottom:tab===id?`2px solid ${C.accent}`:"2px solid transparent",
+            fontSize:9,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* Overview */}
+      {tab==="overview"&&(
+        <div>
+          {!stats?(
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
+              <StatCard label="Total Trades"  value={stats.total}                           />
+              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}   color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
+              <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
+              <StatCard label="Profit Factor" value={fmt(stats.pf)}          color={stats.pf>=1.5?C.accent:C.red}/>
+              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`} color={C.accent}/>
+              <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
+              <StatCard label="Max Consec W"  value={stats.maxCW}             color={C.accent}/>
+              <StatCard label="Max Consec L"  value={stats.maxCL}             color={C.red}/>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Equity Curve */}
+      {tab==="chart"&&(
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Equity Curve · $100 Start</div>
+          {equityCurve.length>1?(
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
+                <defs><linearGradient id="jgrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={C.accent} stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor={C.accent} stopOpacity={0}/>
+                </linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                <XAxis dataKey="t" tickFormatter={t=>new Date(t).toLocaleDateString("en-MY",{month:"short",day:"numeric"})} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={44}/>
+                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                <ReferenceLine y={100} stroke={C.muted} strokeDasharray="4 4"/>
+                <Area type="monotone" dataKey="eq" stroke={C.accent} strokeWidth={2} fill="url(#jgrad)" dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          ):(
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
+          )}
+        </div>
+      )}
+
+      {/* By Pair */}
+      {tab==="breakdown"&&(
+        <div>
+          {pnlByPair.length>0&&(
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+              <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={pnlByPair} margin={{top:4,right:4,left:0,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                  <XAxis dataKey="name" tick={{fill:C.muted,fontSize:10}} tickLine={false} axisLine={false}/>
+                  <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
+                  <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                  <ReferenceLine y={0} stroke={C.muted}/>
+                  <Bar dataKey="value" radius={[3,3,0,0]} fill={C.accent}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {filtered.length>0&&(
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+              <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>Stats by Pair + Strategy</div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                  <thead><tr style={{background:C.bg}}>
+                    {["Pair","TF","Strategy","Trades","WR %","P&L","Avg Win","Avg Loss"].map(h=>(
+                      <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {(()=>{
+                      const groups={};
+                      filtered.forEach(t=>{const k=`${t.symbol}|${t.timeframe}|${t.label||"-"}`;if(!groups[k])groups[k]=[];groups[k].push(t);});
+                      return Object.entries(groups).map(([k,ts])=>{
+                        const[sym,tf,lbl]=k.split("|");
+                        const w=ts.filter(t=>t.won),l=ts.filter(t=>!t.won);
+                        const pnl=ts.reduce((a,t)=>a+(t.pnl||0),0);
+                        const aw=w.length?w.reduce((a,t)=>a+(t.pnl||0),0)/w.length:0;
+                        const al=l.length?Math.abs(l.reduce((a,t)=>a+(t.pnl||0),0)/l.length):0;
+                        const wr=w.length/ts.length*100;
+                        return(<tr key={k} style={{borderTop:`1px solid ${C.border}`}}>
+                          <td style={{padding:"6px 10px",fontWeight:700}}>{sym.replace("/USDT","")}</td>
+                          <td style={{padding:"6px 10px",color:C.muted}}>{tf.toUpperCase()}</td>
+                          <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{lbl}</td>
+                          <td style={{padding:"6px 10px"}}>{ts.length} ({w.length}W/{l.length}L)</td>
+                          <td style={{padding:"6px 10px",color:wr>=50?C.accent:C.red}}>{fmt(wr)}%</td>
+                          <td style={{padding:"6px 10px",color:pnl>=0?C.accent:C.red}}>{pnl>=0?"+":""}${fmt(pnl)}</td>
+                          <td style={{padding:"6px 10px",color:C.accent}}>${fmt(aw)}</td>
+                          <td style={{padding:"6px 10px",color:C.red}}>${fmt(al)}</td>
+                        </tr>);
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Trade Log */}
+      {tab==="trades"&&(
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
+          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
+            Trade Log · {filtered.length} trades
+          </div>
+          {filtered.length===0?(
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
+          ):(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr style={{background:C.bg}}>
+                  {["Date","Pair","TF","Dir","Entry","Exit","RR","P&L","Balance","Strategy"].map(h=>(
+                    <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {filtered.map((t,i)=>(
+                    <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:t.won?"#00ff9d05":"#ff446605"}}>
+                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDate(t.created_at)}</td>
+                      <td style={{padding:"6px 10px",fontWeight:700}}>{(t.symbol||"").replace("/USDT","")}</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{(t.timeframe||"").toUpperCase()}</td>
+                      <td style={{padding:"6px 10px"}}>
+                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
+                      </td>
+                      <td style={{padding:"6px 10px"}}>{fmt(t.entry,4)}</td>
+                      <td style={{padding:"6px 10px"}}>{fmt(t.exit_price,4)}</td>
+                      <td style={{padding:"6px 10px",color:C.gold}}>{t.rr}R</td>
+                      <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red,fontWeight:700}}>{t.pnl>=0?"+":""}${fmt(t.pnl)}</td>
+                      <td style={{padding:"6px 10px"}}>${fmt(t.balance)}</td>
+                      <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{t.label||"-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MAIN APP ──────────────────────────────────────────────
 function App(){
   const [mainTab,setMainTab]=useState("single");
-  const tabs=[["single","Single"],["matrix","Matrix"],["compare","Compare"]];
+  const tabs=[["single","Single"],["matrix","Matrix"],["compare","Compare"],["journal","Journal"]];
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,padding:"20px 16px",maxWidth:900,margin:"0 auto"}}>
@@ -683,9 +958,9 @@ function App(){
           <button key={id} onClick={()=>setMainTab(id)} style={{
             flex:1,padding:"12px 8px",
             background:mainTab===id?C.card:"transparent",
-            color:mainTab===id?(id==="compare"?C.gold:C.accent):C.muted,
+            color:mainTab===id?(id==="compare"?C.gold:id==="journal"?C.blue:C.accent):C.muted,
             border:"none",
-            borderBottom:mainTab===id?`2px solid ${id==="compare"?C.gold:C.accent}`:"2px solid transparent",
+            borderBottom:mainTab===id?`2px solid ${id==="compare"?C.gold:id==="journal"?C.blue:C.accent}`:"2px solid transparent",
             fontSize:11,fontWeight:mainTab===id?700:400,
             cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
           }}>{label}</button>
@@ -695,6 +970,7 @@ function App(){
       {mainTab==="single"&&<SingleTab/>}
       {mainTab==="matrix"&&<MatrixTab/>}
       {mainTab==="compare"&&<CompareTab/>}
+      {mainTab==="journal"&&<JournalTab/>}
     </div>
   );
 }
