@@ -356,14 +356,45 @@ function MatrixTab(){
   const [sortKey,   setSortKey]   = useState("total_return");
   const [sortDir,   setSortDir]   = useState("desc");
   const [error,     setError]     = useState("");
+  const [prefetchMsg, setPrefetchMsg] = useState("");
 
   const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
   const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length;
 
+  const waitForPrefetch=async(symbol,timeframe,start,end)=>{
+    // Kick off background fetch
+    await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({symbol,timeframe,start_date:start,end_date:end})});
+    // Poll until ready or error
+    for(let i=0;i<180;i++){  // max 3 min wait
+      await new Promise(r=>setTimeout(r,2000));
+      const res=await fetch(`${API}/prefetch-status?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&start_date=${start}&end_date=${end}`);
+      const d=await res.json();
+      setPrefetchMsg(`Prefetching ${symbol} ${timeframe.toUpperCase()}... ${d.db_candles.toLocaleString()}/${d.expected.toLocaleString()} candles (${d.completeness_pct}%)`);
+      if(d.ready||d.job_status==="error") return d;
+    }
+    return {ready:false};
+  };
+
   const run=useCallback(async()=>{
     if(!totalCombos) return;
-    setStatus("loading"); setResults([]); setProgress(0); setError("");
+    setStatus("prefetching"); setResults([]); setProgress(0); setError(""); setPrefetchMsg("");
     const {start,end}=getPeriodDates(PERIODS[period]);
+
+    // Step 1 — prefetch all unique pair+timeframe combos
+    const uniqueCombos=[...new Set(selPairs.flatMap(sym=>selTfs.map(tf=>`${sym}|${tf}`)))];
+    for(const combo of uniqueCombos){
+      const [symbol,timeframe]=combo.split("|");
+      setPrefetchMsg(`Starting prefetch: ${symbol} ${timeframe.toUpperCase()}...`);
+      const result=await waitForPrefetch(symbol,timeframe,start,end);
+      if(!result.ready){
+        // Not ready but proceed anyway — backtest will try live fetch
+        setPrefetchMsg(`${symbol} ${timeframe.toUpperCase()} prefetch incomplete — proceeding...`);
+      }
+    }
+
+    // Step 2 — run matrix
+    setStatus("loading"); setPrefetchMsg("");
     const configs=[];
     for(const sym of selPairs) for(const tf of selTfs) for(const risk of selRisks)
       for(const pn of selPivots) for(const rr of selRR) for(const fib of selFibs)
@@ -420,11 +451,17 @@ function MatrixTab(){
         <div style={{marginBottom:14}}>
           <Sel label="Period" value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
         </div>
-        <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
-          background:status==="loading"||!totalCombos?C.dim:C.accent,color:C.bg,border:"none",
+        <button onClick={run} disabled={status==="loading"||status==="prefetching"||!totalCombos} style={{
+          background:status==="loading"||status==="prefetching"||!totalCombos?C.dim:C.accent,color:C.bg,border:"none",
           borderRadius:8,padding:"12px 20px",fontSize:13,fontWeight:800,
-          cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
-        }}>{status==="loading"?`⟳ ${progress}/${total} running...`:`▶ RUN MATRIX (${totalCombos} combos)`}</button>
+          cursor:status==="loading"||status==="prefetching"||!totalCombos?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
+        }}>{status==="prefetching"?"⟳ PREFETCHING DATA...":status==="loading"?`⟳ ${progress}/${total} running...`:`▶ RUN MATRIX (${totalCombos} combos)`}</button>
+        {status==="prefetching"&&<div style={{marginTop:8,padding:"8px 12px",background:C.card,borderRadius:6,border:`1px solid ${C.gold}`,fontSize:11,color:C.gold}}>
+          🔄 {prefetchMsg||"Preparing candle data..."}
+          <div style={{marginTop:6,background:C.dim,borderRadius:3,height:4,overflow:"hidden"}}>
+            <div style={{background:C.gold,height:4,borderRadius:3,width:"60%"}}/>
+          </div>
+        </div>}
         {status==="loading"&&<ProgressBar value={progress} total={total}/>}
         {error&&<div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
       </div>
