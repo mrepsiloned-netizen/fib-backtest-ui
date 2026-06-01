@@ -375,7 +375,10 @@ function MatrixTab(){
       try{
         const res=await fetch(`${API}/batch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configs:batch})});
         const data=await res.json();
-        if(data.success){allResults.push(...data.results);setProgress(allResults.length);setResults([...allResults]);}
+        if(data.success){
+          const stamped=data.results.map((r,i)=>({...r,fib_level:batch[i]?.fib_level??r.fib_level}));
+          allResults.push(...stamped);setProgress(allResults.length);setResults([...allResults]);
+        }
       }catch(e){setError(e.message);}
     }
     setStatus("done");
