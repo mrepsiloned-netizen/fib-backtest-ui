@@ -430,7 +430,24 @@ function MatrixTab(){
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>{sorted.length} combinations</span>
-            {sorted[0]&&<span style={{fontSize:10,color:C.accent}}>Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} {fmtRisk(sorted[0].risk_method)} N={sorted[0].pivot_n} {sorted[0].rr}R</span>}
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              {sorted[0]&&<span style={{fontSize:10,color:C.accent}}>Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} {fmtRisk(sorted[0].risk_method)} N={sorted[0].pivot_n} {sorted[0].rr}R Fib={sorted[0].fib_level??0.618}</span>}
+              <button onClick={()=>{
+                const headers=["Pair","TF","Risk","N","RR","Fib","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","Kelly%","FinalEquity"];
+                const rows=sorted.map(r=>{const s=r.stats;return[
+                  r.symbol.replace("/USDT",""),r.timeframe?.toUpperCase(),fmtRisk(r.risk_method),r.pivot_n,r.rr,r.fib_level??0.618,
+                  fmt(s.total_return),fmt(s.cagr),fmt(s.max_drawdown),fmt(s.sharpe),fmt(s.profit_factor),fmt(s.win_rate),s.total_trades,
+                  fmt(s.avg_win,4),fmt(s.avg_loss,4),fmt((s.kelly_full||0)*100,1),fmt(s.final_equity)
+                ].join(",");});
+                const csv=[headers.join(","),...rows].join("\n");
+                const a=document.createElement("a");
+                a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+                a.download="matrix_results.csv"; a.click();
+              }} style={{
+                background:C.accentDim,border:`1px solid ${C.accent}`,borderRadius:6,
+                padding:"5px 12px",cursor:"pointer",fontSize:10,color:C.accent,fontWeight:700,letterSpacing:"0.08em"
+              }}>↓ CSV</button>
+            </div>
           </div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
@@ -440,6 +457,7 @@ function MatrixTab(){
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
+                <th style={{padding:"8px 10px",color:C.blue,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Fib</th>
                 <SortTh k="total_return" label="Return %"/>
                 <SortTh k="cagr" label="CAGR %"/>
                 <SortTh k="max_drawdown" label="Max DD %"/>
@@ -447,6 +465,10 @@ function MatrixTab(){
                 <SortTh k="profit_factor" label="PF"/>
                 <SortTh k="win_rate" label="WR %"/>
                 <SortTh k="total_trades" label="Trades"/>
+                <SortTh k="avg_win" label="Avg Win"/>
+                <SortTh k="avg_loss" label="Avg Loss"/>
+                <SortTh k="kelly_full" label="Kelly %"/>
+                <SortTh k="final_equity" label="Equity $"/>
               </tr></thead>
               <tbody>
                 {sorted.map((r,i)=>{
@@ -458,6 +480,7 @@ function MatrixTab(){
                       <td style={{padding:"6px 10px",color:C.muted}}>{fmtRisk(r.risk_method)}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{r.pivot_n}</td>
                       <td style={{padding:"6px 10px",color:C.gold}}>{r.rr}R</td>
+                      <td style={{padding:"6px 10px",color:C.blue,fontWeight:700}}>{r.fib_level??0.618}</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red,fontWeight:700}}>{g?"+":""}{fmt(s.total_return)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt(s.cagr)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.red}}>-{fmt(s.max_drawdown)}%</td>
@@ -465,6 +488,10 @@ function MatrixTab(){
                       <td style={{padding:"6px 10px",textAlign:"right",color:s.profit_factor>=1.5?C.accent:C.red}}>{fmt(s.profit_factor)}</td>
                       <td style={{padding:"6px 10px",textAlign:"right"}}>{fmt(s.win_rate)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{s.total_trades}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.accent}}>${fmt(s.avg_win,3)}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.red}}>${fmt(s.avg_loss,3)}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt((s.kelly_full||0)*100,1)}%</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red}}>${fmt(s.final_equity)}</td>
                     </tr>
                   );
                 })}
