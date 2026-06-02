@@ -153,7 +153,7 @@ function SingleTab(){
       if(!data.success) throw new Error(data.error);
       setResult(data); setStatus("done");
     }catch(e){setError(e.message);setStatus("error");}
-  },[symbol,tf,period,risk,pivotN,rr]);
+  },[symbol,tf,period,risk,pivotN,fibLevel,rr]);
 
   const s=result?.stats, green=s&&s.total_return>=0, col=green?C.accent:C.red;
 
