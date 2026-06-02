@@ -424,6 +424,7 @@ function MatrixTab(){
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
+                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Fib</th>
                 <SortTh k="total_return" label="Return %"/>
                 <SortTh k="cagr" label="CAGR %"/>
                 <SortTh k="max_drawdown" label="Max DD %"/>
@@ -442,6 +443,7 @@ function MatrixTab(){
                       <td style={{padding:"6px 10px",color:C.muted}}>{fmtRisk(r.risk_method)}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{r.pivot_n}</td>
                       <td style={{padding:"6px 10px",color:C.gold}}>{r.rr}R</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{r.fib_level||0.618}</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red,fontWeight:700}}>{g?"+":""}{fmt(s.total_return)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt(s.cagr)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.red}}>-{fmt(s.max_drawdown)}%</td>
@@ -613,6 +615,12 @@ function CompareTab(){
               }}>{l}</div>
             ))}
             <div style={{marginLeft:"auto",fontSize:10,color:C.muted,alignSelf:"center"}}>{filtered.length} results</div>
+            <button onClick={()=>{
+              const headers=["Pair","TF","Risk","N","RR","Fib","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","MaxCWins","MaxCLoss","KellyFull","KellyHalf","FinalEquity"];
+              const rows=sorted.map(r=>{const s=r.stats;return[r.symbol.replace("/USDT",""),r.timeframe,r.risk_method,r.pivot_n,r.rr,r.fib_level||0.618,s.total_return,s.cagr,s.max_drawdown,s.sharpe,s.profit_factor,s.win_rate,s.total_trades,s.avg_win,s.avg_loss,s.max_consec_wins,s.max_consec_losses,s.kelly_full,s.kelly_half,s.final_equity].join(",");});
+              const csv=[headers.join(","),...rows].join("\n");
+              const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="waddle_matrix_results.csv";a.click();
+            }} style={{marginLeft:8,padding:"4px 10px",background:"transparent",border:`1px solid ${C.accent}`,borderRadius:6,color:C.accent,fontSize:10,cursor:"pointer"}}>⬇ Export CSV</button>
           </div>
 
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
