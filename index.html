@@ -415,6 +415,12 @@ function MatrixTab(){
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>{sorted.length} combinations</span>
             {sorted[0]&&<span style={{fontSize:10,color:C.accent}}>Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} {fmtRisk(sorted[0].risk_method)} N={sorted[0].pivot_n} {sorted[0].rr}R</span>}
+            <button onClick={()=>{
+              const headers=["Pair","TF","Risk","N","RR","Fib","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","MaxCWins","MaxCLoss","KellyFull","KellyHalf","FinalEquity"];
+              const rows=sorted.map(r=>{const s=r.stats;return[r.symbol.replace("/USDT",""),r.timeframe,r.risk_method,r.pivot_n,r.rr,r.fib_level||0.618,s.total_return,s.cagr,s.max_drawdown,s.sharpe,s.profit_factor,s.win_rate,s.total_trades,s.avg_win,s.avg_loss,s.max_consec_wins,s.max_consec_losses,s.kelly_full,s.kelly_half,s.final_equity].join(",");});
+              const csv=[headers.join(","),...rows].join("\n");
+              const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="waddle_matrix_results.csv";a.click();
+            }} style={{marginLeft:"auto",padding:"4px 12px",background:"transparent",border:`1px solid ${C.accent}`,borderRadius:6,color:C.accent,fontSize:10,cursor:"pointer"}}>⬇ Export CSV</button>
           </div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
