@@ -44,8 +44,6 @@ const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const PERIODS = [
-  { label:"Last 1 Hour",  start:null, end:"now", hours:1 },
-  { label:"Last 4 Hours", start:null, end:"now", hours:4 },
   { label:"Last 7 Days",  start:null, end:"now", days:7 },
   { label:"Last 30 Days", start:null, end:"now", days:30 },
   { label:"Last 90 Days", start:null, end:"now", days:90 },
@@ -63,11 +61,6 @@ function getPeriodDates(p) {
   if (!p) return { start: "2025-01-01", end: "2026-01-01" };
   const now = new Date();
   if (p.start) return { start: p.start, end: p.end };
-  if (p.hours) {
-    // For sub-day periods, pass ISO datetime string so backend can handle minutes precision
-    const d = new Date(now.getTime() - p.hours * 3600000);
-    return { start: d.toISOString().slice(0,16), end: "now" };
-  }
   if (p.days) {
     const d = new Date(now.getTime() - p.days * 86400000);
     return { start: d.toISOString().split("T")[0], end: "now" };
@@ -497,8 +490,6 @@ function CompareTab(){
   const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length;
 
   const PERIOD_PRESETS=[
-    {label:"Last 1 Hour",  start:null, end:"now", hours:1},
-    {label:"Last 4 Hours", start:null, end:"now", hours:4},
     {label:"Last 7 Days",  start:null, end:"now", days:7},
     {label:"Last 30 Days", start:null, end:"now", days:30},
     {label:"Last 90 Days", start:null, end:"now", days:90},
