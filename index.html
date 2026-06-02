@@ -66,7 +66,7 @@ function getPeriodDates(p) {
   if (p.hours) {
     // For sub-day periods, pass ISO datetime string so backend can handle minutes precision
     const d = new Date(now.getTime() - p.hours * 3600000);
-    return { start: d.toISOString().slice(0,16).replace("T"," "), end: "now" };
+    return { start: d.toISOString().slice(0,16), end: "now" };
   }
   if (p.days) {
     const d = new Date(now.getTime() - p.days * 86400000);
