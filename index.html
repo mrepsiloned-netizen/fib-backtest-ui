@@ -42,6 +42,7 @@ const ALL_PAIRS      = ["INJ/USDT","BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","
 const ALL_TIMEFRAMES = ["1m","5m","15m","1h","4h","1d"];
 const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
+const ALL_FIBS       = [0.382, 0.5, 0.618];
 const ALL_RR         = [1.5,2,3,4];
 const PERIODS = [
   { label:"Last 7 Days",  start:null, end:"now", days:7 },
@@ -135,6 +136,7 @@ function SingleTab(){
   const [period,setPeriod]   = useState(3);
   const [risk,setRisk]       = useState("fixed");
   const [pivotN,setPivotN]   = useState(5);
+  const [fibLevel,setFibLevel]= useState(0.618);
   const [rr,setRr]           = useState(2);
   const [status,setStatus]   = useState("idle");
   const [result,setResult]   = useState(null);
@@ -146,7 +148,7 @@ function SingleTab(){
     try{
       const {start,end} = getPeriodDates(PERIODS[period]);
       const res=await fetch(`${API}/backtest`,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({symbol,timeframe:tf,start_date:start,end_date:end,pivot_n:pivotN,risk_method:risk,risk_pct:0.02,rr})});
+        body:JSON.stringify({symbol,timeframe:tf,start_date:start,end_date:end,pivot_n:pivotN,fib_level:fibLevel,risk_method:risk,risk_pct:0.02,rr})});
       const data=await res.json();
       if(!data.success) throw new Error(data.error);
       setResult(data); setStatus("done");
@@ -163,6 +165,8 @@ function SingleTab(){
           <Sel label="Timeframe" value={tf}      onChange={setTf}            options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
           <Sel label="Period"    value={period}  onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
           <Sel label="Pivot N"   value={pivotN}  onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
+          <Sel label="Fib Level" value={fibLevel} onChange={v=>setFibLevel(+v)} options={ALL_FIBS.map(f=>({value:f,label:`${f}`}))}/>
+          <Sel label="Fib Level" value={fibLevel} onChange={v=>setFibLevel(+v)} options={ALL_FIBS.map(f=>({value:f,label:`${f}`}))}/>
         </div>
         <div style={{marginBottom:14}}>
           <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk:Reward</span>
@@ -294,24 +298,18 @@ function SingleTab(){
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
                 <thead><tr style={{background:C.bg}}>
-                  {["#","Dir","Entry Time","Exit Time","Entry","SL","TP","Exit","Result","PnL","Equity"].map(h=>(
+                  {["#","Dir","Date","Entry","SL","TP","Exit","Result","PnL","Equity"].map(h=>(
                     <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
-                  {[...result.trades].reverse().map(t=>{
-                    const fmtTime = ts => {
-                      const d = new Date(ts);
-                      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
-                    };
-                    return (
+                  {[...result.trades].reverse().map(t=>(
                     <tr key={t.id} style={{borderTop:`1px solid ${C.border}`}}>
                       <td style={{padding:"6px 10px",color:C.muted}}>{t.id}</td>
                       <td style={{padding:"6px 10px"}}>
                         <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
                       </td>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtTime(t.entry_time)}</td>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtTime(t.exit_time)}</td>
+                      <td style={{padding:"6px 10px",color:C.muted}}>{new Date(t.entry_time).toLocaleDateString()}</td>
                       <td style={{padding:"6px 10px"}}>{t.entry}</td>
                       <td style={{padding:"6px 10px",color:C.red}}>{t.sl}</td>
                       <td style={{padding:"6px 10px",color:C.accent}}>{t.tp}</td>
@@ -320,7 +318,7 @@ function SingleTab(){
                       <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red}}>{t.pnl>=0?"+":""}{fmt(t.pnl)}</td>
                       <td style={{padding:"6px 10px"}}>${fmt(t.equity)}</td>
                     </tr>
-                  )})}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -338,6 +336,7 @@ function MatrixTab(){
   const [selTfs,    setSelTfs]    = useState(["4h"]);
   const [selRisks,  setSelRisks]  = useState(["fixed","half_kelly","full_kelly"]);
   const [selPivots, setSelPivots] = useState([5]);
+  const [selFibs,   setSelFibs]   = useState([0.618]);
   const [selRR,     setSelRR]     = useState([2]);
   const [period,    setPeriod]    = useState(3);
   const [status,    setStatus]    = useState("idle");
@@ -349,7 +348,7 @@ function MatrixTab(){
   const [error,     setError]     = useState("");
 
   const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
-  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length;
+  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length;
 
   const run=useCallback(async()=>{
     if(!totalCombos) return;
@@ -358,7 +357,8 @@ function MatrixTab(){
     const configs=[];
     for(const sym of selPairs) for(const tf of selTfs) for(const risk of selRisks)
       for(const pn of selPivots) for(const rr of selRR)
-        configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,pivot_n:pn,risk_method:risk,risk_pct:0.02,rr});
+        for(const fib of selFibs)
+        configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,pivot_n:pn,fib_level:fib,risk_method:risk,risk_pct:0.02,rr});
     setTotal(configs.length);
     const allResults=[];
     for(let i=0;i<configs.length;i+=8){
@@ -370,7 +370,7 @@ function MatrixTab(){
       }catch(e){setError(e.message);}
     }
     setStatus("done");
-  },[selPairs,selTfs,selRisks,selPivots,selRR,period,totalCombos]);
+  },[selPairs,selTfs,selRisks,selPivots,selRR,selFibs,period,totalCombos]);
 
   const sorted=useMemo(()=>{
     const ok=results.filter(r=>r.success&&r.stats);
@@ -395,6 +395,8 @@ function MatrixTab(){
           ["Timeframes", ALL_TIMEFRAMES, selTfs, setSelTfs, t=>t.toUpperCase()],
           ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
           ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
+          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
+          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
           ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
@@ -493,7 +495,7 @@ function CompareTab(){
   const [error,     setError]     = useState("");
 
   const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
-  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length;
+  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length;
 
   const PERIOD_PRESETS=[
     {label:"Last 7 Days",  start:null, end:"now", days:7},
@@ -581,6 +583,8 @@ function CompareTab(){
           ["Timeframes", ALL_TIMEFRAMES, selTfs, setSelTfs, t=>t.toUpperCase()],
           ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
           ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
+          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
+          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
           ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
