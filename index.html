@@ -165,8 +165,18 @@ function SingleTab(){
           <Sel label="Timeframe" value={tf}      onChange={setTf}            options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
           <Sel label="Period"    value={period}  onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
           <Sel label="Pivot N"   value={pivotN}  onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
-          <Sel label="Fib Level" value={fibLevel} onChange={v=>setFibLevel(+v)} options={ALL_FIBS.map(f=>({value:f,label:`${f}`}))}/>
-          <Sel label="Fib Level" value={fibLevel} onChange={v=>setFibLevel(+v)} options={ALL_FIBS.map(f=>({value:f,label:`${f}`}))}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Fib Level</span>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {ALL_FIBS.map(f=>(
+              <div key={f} onClick={()=>setFibLevel(f)} style={{
+                background:fibLevel===f?C.accentDim:C.card,border:`1px solid ${fibLevel===f?C.accent:C.border}`,
+                borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
+                color:fibLevel===f?C.accent:C.text,fontWeight:fibLevel===f?700:400
+              }}>{f}</div>
+            ))}
+          </div>
         </div>
         <div style={{marginBottom:14}}>
           <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk:Reward</span>
