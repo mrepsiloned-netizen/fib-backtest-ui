@@ -406,7 +406,6 @@ function MatrixTab(){
           ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
           ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
           ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
-          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
           ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
@@ -593,7 +592,6 @@ function CompareTab(){
           ["Timeframes", ALL_TIMEFRAMES, selTfs, setSelTfs, t=>t.toUpperCase()],
           ["Risk Methods", ALL_RISKS, selRisks, setSelRisks, fmtRisk],
           ["Pivot N", ALL_PIVOTS, selPivots, setSelPivots, n=>`N=${n}`],
-          ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
           ["Fib Level", ALL_FIBS, selFibs, setSelFibs, f=>`${f}`],
           ["Risk:Reward", ALL_RR, selRR, setSelRR, r=>`${r}R`],
         ].map(([label,all,sel,setSel,fmt])=>(
