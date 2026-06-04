@@ -595,6 +595,8 @@ function CompareTab(){
 
   const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
   const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length;
+
+  const PERIOD_PRESETS=[
     {label:"Last 7 Days",  start:null, end:"now", days:7},
     {label:"Last 30 Days", start:null, end:"now", days:30},
     {label:"Last 90 Days", start:null, end:"now", days:90},
