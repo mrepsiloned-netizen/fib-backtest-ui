@@ -38,7 +38,7 @@ const C = {
   text:"#e6edf3", muted:"#6e7681", dim:"#21262d",
 };
 
-const ALL_PAIRS      = ["INJ/USDT","BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT"];
+const ALL_PAIRS      = ["XRP/USDT","DOGE/USDT","TRX/USDT","XLM/USDT","ADA/USDT","ARB/USDT"];
 const ALL_TIMEFRAMES = ["1m","5m","15m","1h","4h","1d"];
 const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
@@ -206,7 +206,7 @@ function EntryChips({value,onChange}) {
 
 // ── SINGLE TAB ─────────────────────────────────────────────────
 function SingleTab() {
-  const [symbol,    setSymbol]    = useState("ETH/USDT");
+  const [symbol,    setSymbol]    = useState("XRP/USDT");
   const [tf,        setTf]        = useState("1m");
   const [period,    setPeriod]    = useState(3);
   const [risk,      setRisk]      = useState("fixed");
@@ -530,7 +530,7 @@ function SingleTab() {
 
 // ── MATRIX TAB ─────────────────────────────────────────────────
 function MatrixTab() {
-  const [selPairs,      setSelPairs]      = useState(["ETH/USDT","BTC/USDT","XRP/USDT"]);
+  const [selPairs,      setSelPairs]      = useState(["XRP/USDT","DOGE/USDT","TRX/USDT"]);
   const [selTfs,        setSelTfs]        = useState(["1m"]);
   const [selRisks,      setSelRisks]      = useState(["fixed"]);
   const [selPivots,     setSelPivots]     = useState([8]);
@@ -695,7 +695,7 @@ function MatrixTab() {
 
 // ── COMPARE TAB ────────────────────────────────────────────────
 function CompareTab() {
-  const [selPairs,      setSelPairs]      = useState(["ETH/USDT","BTC/USDT","SOL/USDT"]);
+  const [selPairs,      setSelPairs]      = useState(["XRP/USDT","DOGE/USDT","ADA/USDT"]);
   const [selTfs,        setSelTfs]        = useState(["1m"]);
   const [selRisks,      setSelRisks]      = useState(["fixed"]);
   const [selPivots,     setSelPivots]     = useState([8]);
@@ -906,10 +906,10 @@ function CompareTab() {
 
 // ── PREFETCH TAB ───────────────────────────────────────────────
 function PrefetchTab() {
-  const [symbol,    setSymbol]    = useState("ETH/USDT");
+  const [symbol,    setSymbol]    = useState("XRP/USDT");
   const [tf,        setTf]        = useState("1m");
   const [startDate, setStartDate] = useState("2025-01-01");
-  const [endDate,   setEndDate]   = useState("2026-06-01");
+  const [endDate,   setEndDate]   = useState("now");
   const [status,    setStatus]    = useState(null);
   const [polling,   setPolling]   = useState(false);
   const [jobStatus, setJobStatus] = useState(null);
@@ -1521,10 +1521,10 @@ function App() {
       <div style={{marginBottom:20}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v7</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v8</span>
         </div>
         <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>Live-realistic · Pivot lag · Next-open fill · 1M · 5M · 15M · 1H · 4H · 1D</p>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · Fees on notional · 1M · 5M · 15M · 1H · 4H · 1D</p>
       </div>
 
       <div style={{display:"flex",gap:0,marginBottom:20,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
