@@ -223,13 +223,31 @@ function SingleTab() {
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
   const [chartTab,  setChartTab]  = useState("curve");
+  const [elapsed,   setElapsed]   = useState(0);
+  const [phase,     setPhase]     = useState("");
+
+  const TIMEOUT_MS = 120000; // 2 min hard timeout
 
   const run = useCallback(async () => {
-    setStatus("loading"); setResult(null); setError("");
+    setStatus("loading"); setResult(null); setError(""); setElapsed(0);
+    setPhase("Connecting to server...");
+
+    // Elapsed timer
+    const startTime = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now()-startTime)/1000)), 500);
+
+    // Abort controller for timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, TIMEOUT_MS);
+
     try {
       const {start,end} = getPeriodDates(PERIODS[period]);
+      setPhase("Fetching candle data...");
       const res = await fetch(`${API}/backtest`, {
         method:"POST", headers:{"Content-Type":"application/json"},
+        signal: controller.signal,
         body: JSON.stringify({
           symbol, timeframe:tf, start_date:start, end_date:end,
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
@@ -237,10 +255,17 @@ function SingleTab() {
           entry_mode:entryMode, engine
         })
       });
+      setPhase("Processing results...");
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      setResult(data); setStatus("done");
-    } catch(e) { setError(e.message); setStatus("error"); }
+      setResult(data); setStatus("done"); setPhase("");
+    } catch(e) {
+      const msg = e.name==="AbortError" ? `Timed out after ${TIMEOUT_MS/1000}s — try Prefetch tab first to cache data` : e.message;
+      setError(msg); setStatus("error"); setPhase("");
+    } finally {
+      clearInterval(timer);
+      clearTimeout(timeout);
+    }
   }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
@@ -329,8 +354,32 @@ function SingleTab() {
           background:status==="loading"?C.dim:C.accent,color:C.bg,border:"none",
           borderRadius:8,padding:12,fontSize:13,fontWeight:800,
           cursor:status==="loading"?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
-        }}>{status==="loading"?"⟳ RUNNING...":"▶ RUN BACKTEST"}</button>
-        {status==="error" && <div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8}}>✗ {error}</div>}
+        }}>{status==="loading"?`⟳ RUNNING... ${elapsed}s`:"▶ RUN BACKTEST"}</button>
+
+        {status==="loading" && (
+          <div style={{marginTop:10,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:10,color:C.muted}}>{phase}</span>
+              <span style={{fontSize:10,color:C.gold,fontWeight:700}}>{elapsed}s</span>
+            </div>
+            <div style={{background:C.dim,borderRadius:4,height:3,overflow:"hidden"}}>
+              <div style={{
+                height:3,borderRadius:4,background:C.accent,
+                width:`${Math.min((elapsed/120)*100,95)}%`,
+                transition:"width 0.5s linear"
+              }}/>
+            </div>
+            <div style={{marginTop:6,fontSize:9,color:C.muted}}>
+              {elapsed < 10 ? "Waking up server..." :
+               elapsed < 30 ? "Loading candle data from cache..." :
+               elapsed < 60 ? "Running backtest engine..." :
+               elapsed < 90 ? "Still working — large dataset..." :
+               "Almost done or may have stalled — check Prefetch tab if this continues"}
+            </div>
+          </div>
+        )}
+
+        {status==="error" && <div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8,padding:"8px 12px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>}
       </div>
 
       {/* Results */}
