@@ -44,6 +44,9 @@ const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
+const ALL_ENGINES    = ["original","classic","classic_v2","structure"];
+const ALL_ENTRY      = ["touch","rejection","reclaim"];
+
 const PERIODS = [
   { label:"Last 7 Days",  start:null, end:"now", days:7 },
   { label:"Last 30 Days", start:null, end:"now", days:30 },
@@ -52,35 +55,39 @@ const PERIODS = [
   { label:"2026 YTD",     start:"2026-01-01", end:"now", days:null },
   { label:"Rolling 1Y",   start:null, end:"now", days:365 },
 ];
+
 const RISK_LABELS = { fixed:"Fixed 2%", half_kelly:"Half Kelly", full_kelly:"Full Kelly" };
 
 const fmt     = (n,d=2) => Number(n).toFixed(d);
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"});
-const fmtRisk = (r) => RISK_LABELS[r]||r;
+const fmtDT   = (s)  => s ? new Date(s).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
+const fmtRisk = (r)  => RISK_LABELS[r] || r;
 
 function getPeriodDates(p) {
-  if (!p) return { start: "2025-01-01", end: "2026-01-01" };
+  if (!p) return { start:"2025-01-01", end:"2026-01-01" };
   const now = new Date();
-  if (p.start) return { start: p.start, end: p.end };
+  if (p.start) return { start:p.start, end:p.end };
   if (p.days) {
     const d = new Date(now.getTime() - p.days * 86400000);
-    return { start: d.toISOString().split("T")[0], end: "now" };
+    return { start:d.toISOString().split("T")[0], end:"now" };
   }
-  return { start: "2025-01-01", end: "now" };
+  return { start:"2025-01-01", end:"now" };
 }
 
-// ── SHARED COMPONENTS ─────────────────────────────────────
-function StatCard({label,value,sub,color}){
+function toggle(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
+
+// ── SHARED COMPONENTS ──────────────────────────────────────────
+function StatCard({label,value,sub,color}) {
   return (
     <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px"}}>
       <div style={{fontSize:9,color:C.muted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:4}}>{label}</div>
       <div style={{fontSize:18,fontWeight:800,color:color||C.text,letterSpacing:"-0.02em"}}>{value}</div>
-      {sub&&<div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>}
+      {sub && <div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>}
     </div>
   );
 }
 
-function Sel({label,value,onChange,options}){
+function Sel({label,value,onChange,options}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:4}}>
       <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>{label}</span>
@@ -94,11 +101,10 @@ function Sel({label,value,onChange,options}){
   );
 }
 
-function Toggle({label,value,onChange}){
+function Toggle({label,value,onChange}) {
   return (
     <div onClick={()=>onChange(!value)} style={{
-      background:value?C.accentDim:C.card,
-      border:`1px solid ${value?C.accent:C.border}`,
+      background:value?C.accentDim:C.card,border:`1px solid ${value?C.accent:C.border}`,
       borderRadius:6,padding:"6px 10px",cursor:"pointer",
       display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"
     }}>
@@ -108,8 +114,8 @@ function Toggle({label,value,onChange}){
   );
 }
 
-function ProgressBar({value,total}){
-  const pct = total?(value/total*100):0;
+function ProgressBar({value,total}) {
+  const pct = total ? (value/total*100) : 0;
   return (
     <div style={{marginTop:10,background:C.dim,borderRadius:4,height:4}}>
       <div style={{background:C.accent,height:4,borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
@@ -127,80 +133,132 @@ const EqTip = ({active,payload}) => {
   );
 };
 
-function toggle(arr,val){ return arr.includes(val)?arr.filter(x=>x!==val):[...arr,val]; }
+function ChipRow({label,options,selected,onSelect,color}) {
+  const col = color || C.accent;
+  return (
+    <div style={{marginBottom:14}}>
+      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {options.map(o=>(
+          <div key={o.value||o} onClick={()=>onSelect(o.value||o)} style={{
+            background:selected===(o.value||o)?`${col}15`:C.card,
+            border:`1px solid ${selected===(o.value||o)?col:C.border}`,
+            borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
+            color:selected===(o.value||o)?col:C.text,
+            fontWeight:selected===(o.value||o)?700:400
+          }}>{o.label||o}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-// ── SINGLE TAB ────────────────────────────────────────────
-function SingleTab(){
-  const [symbol,setSymbol]         = useState("SOL/USDT");
-  const [tf,setTf]                 = useState("1m");
-  const [period,setPeriod]         = useState(3);
-  const [risk,setRisk]             = useState("fixed");
-  const [pivotN,setPivotN]         = useState(3);
-  const [rr,setRr]                 = useState(1.5);
-  const [fibLevel,setFibLevel]     = useState(0.618);
-  const [minSwing,setMinSwing]     = useState(0.002);
-  const [stopBuf,setStopBuf]       = useState(0.001);
-  const [kStale,setKStale]         = useState(0);
-  const [entryMode,setEntryMode]   = useState("rejection");
-  const [engine,setEngine]         = useState("original");
-  const [showAdv,setShowAdv]       = useState(false);
-  const [status,setStatus]         = useState("idle");
-  const [result,setResult]         = useState(null);
-  const [error,setError]           = useState("");
-  const [tab,setTab]               = useState("curve");
+function EngineChips({value,onChange}) {
+  const engines = [
+    {value:"original",   label:"Original",   desc:"LH→LL→LH triplet"},
+    {value:"classic",    label:"Classic",    desc:"P1→P3 fixed fib"},
+    {value:"classic_v2", label:"Classic V2", desc:"+ re-base + stale"},
+    {value:"structure",  label:"Structure",  desc:"Floating P3 state"},
+  ];
+  return (
+    <div style={{marginBottom:14}}>
+      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Engine</span>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {engines.map(m=>(
+          <div key={m.value} onClick={()=>onChange(m.value)} style={{
+            background:value===m.value?C.accentDim:C.card,
+            border:`1px solid ${value===m.value?C.accent:C.border}`,
+            borderRadius:8,padding:"10px 8px",cursor:"pointer"
+          }}>
+            <div style={{fontSize:11,fontWeight:700,color:value===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
+            <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-  const run = useCallback(async()=>{
+function EntryChips({value,onChange}) {
+  const modes = [
+    {value:"touch",     label:"Touch",     desc:"Fib hit = fill"},
+    {value:"rejection", label:"Rejection", desc:"Wick + close back"},
+    {value:"reclaim",   label:"Reclaim",   desc:"Close through, recover"},
+  ];
+  return (
+    <div style={{marginBottom:14}}>
+      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Entry Mode</span>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+        {modes.map(m=>(
+          <div key={m.value} onClick={()=>onChange(m.value)} style={{
+            background:value===m.value?C.accentDim:C.card,
+            border:`1px solid ${value===m.value?C.accent:C.border}`,
+            borderRadius:8,padding:"10px 8px",cursor:"pointer"
+          }}>
+            <div style={{fontSize:11,fontWeight:700,color:value===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
+            <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── SINGLE TAB ─────────────────────────────────────────────────
+function SingleTab() {
+  const [symbol,    setSymbol]    = useState("ETH/USDT");
+  const [tf,        setTf]        = useState("1m");
+  const [period,    setPeriod]    = useState(3);
+  const [risk,      setRisk]      = useState("fixed");
+  const [pivotN,    setPivotN]    = useState(8);
+  const [rr,        setRr]        = useState(2);
+  const [fibLevel,  setFibLevel]  = useState(0.618);
+  const [minSwing,  setMinSwing]  = useState(0.002);
+  const [stopBuf,   setStopBuf]   = useState(0.001);
+  const [kStale,    setKStale]    = useState(0);
+  const [entryMode, setEntryMode] = useState("touch");
+  const [engine,    setEngine]    = useState("original");
+  const [showAdv,   setShowAdv]   = useState(false);
+  const [status,    setStatus]    = useState("idle");
+  const [result,    setResult]    = useState(null);
+  const [error,     setError]     = useState("");
+  const [chartTab,  setChartTab]  = useState("curve");
+
+  const run = useCallback(async () => {
     setStatus("loading"); setResult(null); setError("");
-    try{
+    try {
       const {start,end} = getPeriodDates(PERIODS[period]);
-      const res=await fetch(`${API}/backtest`,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          symbol,timeframe:tf,start_date:start,end_date:end,
-          pivot_n:pivotN,risk_method:risk,risk_pct:0.02,rr,fib_level:fibLevel,
-          min_swing_pct:minSwing,stop_buffer_pct:stopBuf,k_stale:kStale,
-          entry_mode:entryMode,engine:engine
-        })});
-      const data=await res.json();
-      if(!data.success) throw new Error(data.error);
+      const res = await fetch(`${API}/backtest`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          symbol, timeframe:tf, start_date:start, end_date:end,
+          pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
+          min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
+          entry_mode:entryMode, engine
+        })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
       setResult(data); setStatus("done");
-    }catch(e){setError(e.message);setStatus("error");}
-  },[symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine]);
+    } catch(e) { setError(e.message); setStatus("error"); }
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine]);
 
-  const s=result?.stats, green=s&&s.total_return>=0, col=green?C.accent:C.red;
+  const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
   return (
     <div>
+      {/* Controls */}
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:20}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          <Sel label="Pair"      value={symbol}  onChange={setSymbol}        options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
-          <Sel label="Timeframe" value={tf}      onChange={setTf}            options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
-          <Sel label="Period"    value={period}  onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
-          <Sel label="Pivot N"   value={pivotN}  onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
+          <Sel label="Pair"      value={symbol} onChange={setSymbol}       options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
+          <Sel label="Timeframe" value={tf}     onChange={setTf}           options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
+          <Sel label="Period"    value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
+          <Sel label="Pivot N"   value={pivotN} onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
         </div>
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Fib Level</span>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {ALL_FIBS.map(f=>(
-              <div key={f} onClick={()=>setFibLevel(f)} style={{
-                background:fibLevel===f?C.accentDim:C.card,border:`1px solid ${fibLevel===f?C.accent:C.border}`,
-                borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
-                color:fibLevel===f?C.accent:C.text,fontWeight:fibLevel===f?700:400
-              }}>{f}</div>
-            ))}
-          </div>
-        </div>
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk:Reward</span>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {ALL_RR.map(r=>(
-              <div key={r} onClick={()=>setRr(r)} style={{
-                background:rr===r?C.accentDim:C.card,border:`1px solid ${rr===r?C.accent:C.border}`,
-                borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
-                color:rr===r?C.accent:C.text,fontWeight:rr===r?700:400
-              }}>{r}R</div>
-            ))}
-          </div>
-        </div>
+
+        <ChipRow label="Fib Level"   options={ALL_FIBS}          selected={fibLevel} onSelect={v=>setFibLevel(+v)}/>
+        <ChipRow label="Risk:Reward" options={ALL_RR.map(r=>({value:r,label:`${r}R`}))} selected={rr} onSelect={v=>setRr(+v)}/>
+
         <div style={{marginBottom:14}}>
           <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk Method</span>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
@@ -217,50 +275,10 @@ function SingleTab(){
           </div>
         </div>
 
-        {/* Engine */}
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Engine</span>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            {[
-              {value:"original",   label:"Original",   desc:"LH→LL→LH triplet"},
-              {value:"classic",    label:"Classic",    desc:"P1→P3 fixed fib"},
-              {value:"classic_v2", label:"Classic V2", desc:"+ re-base + stale"},
-              {value:"structure",  label:"Structure",  desc:"Floating P3 state machine"},
-            ].map(m=>(
-              <div key={m.value} onClick={()=>setEngine(m.value)} style={{
-                background:engine===m.value?C.accentDim:C.card,
-                border:`1px solid ${engine===m.value?C.accent:C.border}`,
-                borderRadius:8,padding:"10px 8px",cursor:"pointer"
-              }}>
-                <div style={{fontSize:11,fontWeight:700,color:engine===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
-                <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <EngineChips value={engine} onChange={setEngine}/>
+        <EntryChips  value={entryMode} onChange={setEntryMode}/>
 
-        {/* Entry Mode */}
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Entry Mode</span>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            {[
-              {value:"touch",    label:"Touch",     desc:"Fib hit = fill"},
-              {value:"rejection",label:"Rejection",  desc:"Wick + close back"},
-              {value:"reclaim",  label:"Reclaim",    desc:"Close through, recover 2c"},
-            ].map(m=>(
-              <div key={m.value} onClick={()=>setEntryMode(m.value)} style={{
-                background:entryMode===m.value?C.accentDim:C.card,
-                border:`1px solid ${entryMode===m.value?C.accent:C.border}`,
-                borderRadius:8,padding:"10px 8px",cursor:"pointer"
-              }}>
-                <div style={{fontSize:11,fontWeight:700,color:entryMode===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
-                <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Advanced params toggle */}
+        {/* Advanced */}
         <div onClick={()=>setShowAdv(!showAdv)} style={{
           display:"flex",alignItems:"center",gap:6,cursor:"pointer",
           marginBottom:showAdv?12:0,color:C.muted,fontSize:10,letterSpacing:"0.08em"
@@ -268,7 +286,7 @@ function SingleTab(){
           <span style={{color:showAdv?C.accent:C.muted}}>{showAdv?"▾":"▸"}</span>
           ADVANCED PARAMS
         </div>
-        {showAdv&&(
+        {showAdv && (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14,
             background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
             <div>
@@ -277,8 +295,7 @@ function SingleTab(){
                 {[0.001,0.002,0.003,0.005].map(v=>(
                   <div key={v} onClick={()=>setMinSwing(v)} style={{
                     background:minSwing===v?C.accentDim:C.card,border:`1px solid ${minSwing===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,
-                    color:minSwing===v?C.accent:C.text
+                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:minSwing===v?C.accent:C.text
                   }}>{(v*100).toFixed(1)}%</div>
                 ))}
               </div>
@@ -289,8 +306,7 @@ function SingleTab(){
                 {[0,0.001,0.002,0.005].map(v=>(
                   <div key={v} onClick={()=>setStopBuf(v)} style={{
                     background:stopBuf===v?C.accentDim:C.card,border:`1px solid ${stopBuf===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,
-                    color:stopBuf===v?C.accent:C.text
+                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:stopBuf===v?C.accent:C.text
                   }}>{v===0?"None":(v*100).toFixed(1)+"%"}</div>
                 ))}
               </div>
@@ -301,8 +317,7 @@ function SingleTab(){
                 {[0,10,20,50].map(v=>(
                   <div key={v} onClick={()=>setKStale(v)} style={{
                     background:kStale===v?C.accentDim:C.card,border:`1px solid ${kStale===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,
-                    color:kStale===v?C.accent:C.text
+                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:kStale===v?C.accent:C.text
                   }}>{v===0?"Off":v}</div>
                 ))}
               </div>
@@ -315,19 +330,22 @@ function SingleTab(){
           borderRadius:8,padding:12,fontSize:13,fontWeight:800,
           cursor:status==="loading"?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
         }}>{status==="loading"?"⟳ RUNNING...":"▶ RUN BACKTEST"}</button>
-        {status==="error"&&<div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8}}>✗ {error}</div>}
+        {status==="error" && <div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8}}>✗ {error}</div>}
       </div>
 
-      {status==="done"&&result&&s&&(
+      {/* Results */}
+      {status==="done" && result && s && (
         <div>
+          {/* Meta badges */}
           <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>DATA: {result.source}</span>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.accent}}>ENGINE: {engine.toUpperCase()}</span>
+            <span style={{background:C.accentDim,border:`1px solid ${C.accent}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.accent}}>ENGINE: {engine.toUpperCase()}</span>
             <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>RISK: {result.risk_pct}%</span>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R · FIB: {fibLevel}</span>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.accent}}>ENTRY: {entryMode.toUpperCase()}</span>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.blue}}>SWING: {(minSwing*100).toFixed(1)}% · BUF: {(stopBuf*100).toFixed(1)}% · STALE: {kStale||"off"}</span>
+            <span style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R · FIB: {fibLevel}</span>
+            <span style={{background:C.blueDim,border:`1px solid ${C.blue}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.blue}}>ENTRY: {entryMode.toUpperCase()} · N={pivotN}</span>
           </div>
+
+          {/* Hero return */}
           <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>TOTAL RETURN</div>
@@ -339,54 +357,41 @@ function SingleTab(){
               <div style={{fontSize:11,color:C.muted}}>CAGR {fmt(s.cagr)}% · Max DD -{fmt(s.max_drawdown)}% · Sharpe {fmt(s.sharpe)}</div>
             </div>
           </div>
-          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 16px",marginBottom:16,display:"flex",gap:24,flexWrap:"wrap"}}>
-            <div style={{fontSize:10,color:C.muted}}>
-              <span style={{color:C.text,fontWeight:700,fontSize:14,marginRight:6}}>{s.total_trades}</span>Total Trades
-            </div>
-            <div style={{fontSize:10,color:C.muted}}>
-              <span style={{color:C.accent,fontWeight:700,fontSize:14,marginRight:6}}>{s.wins}</span>Wins
-            </div>
-            <div style={{fontSize:10,color:C.muted}}>
-              <span style={{color:C.red,fontWeight:700,fontSize:14,marginRight:6}}>{s.losses}</span>Losses
-            </div>
-            <div style={{fontSize:10,color:C.muted}}>
-              <span style={{color:C.gold,fontWeight:700,fontSize:14,marginRight:6}}>{fmt(s.win_rate)}%</span>Win Rate
-            </div>
-            <div style={{fontSize:10,color:C.muted}}>
-              <span style={{color:C.text,fontWeight:700,fontSize:14,marginRight:6}}>{fmt(s.profit_factor)}</span>Profit Factor
-            </div>
-          </div>
+
+          {/* Stat grid */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-            <StatCard label="Final Equity"  value={`$${fmt(s.final_equity)}`}   color={col}/>
-            <StatCard label="CAGR"          value={`${fmt(s.cagr)}%`}           color={C.gold} sub="annualised"/>
+            <StatCard label="Final Equity"  value={`$${fmt(s.final_equity)}`}    color={col}/>
+            <StatCard label="CAGR"          value={`${fmt(s.cagr)}%`}            color={C.gold} sub="annualised"/>
             <StatCard label="Daily Avg"     value={`${fmt(s.daily_return,3)}%`}/>
-            <StatCard label="Win Rate"      value={`${fmt(s.win_rate)}%`}       sub={`${s.wins}W / ${s.losses}L`}/>
-            <StatCard label="Profit Factor" value={fmt(s.profit_factor)}        color={s.profit_factor>=1.5?C.accent:C.red}/>
-            <StatCard label="Max Drawdown"  value={`-${fmt(s.max_drawdown)}%`}  color={C.red}/>
-            <StatCard label="Sharpe"        value={fmt(s.sharpe)}               color={s.sharpe>=1?C.accent:C.muted}/>
-            <StatCard label="Max Consec W"  value={s.max_consec_wins}           color={C.accent}/>
-            <StatCard label="Max Consec L"  value={s.max_consec_losses}         color={C.red}/>
-            <StatCard label="Avg Win $"     value={`$${fmt(s.avg_win,3)}`}      color={C.accent}/>
-            <StatCard label="Avg Loss $"    value={`$${fmt(s.avg_loss,3)}`}     color={C.red}/>
+            <StatCard label="Win Rate"      value={`${fmt(s.win_rate)}%`}        sub={`${s.wins}W / ${s.losses}L`}/>
+            <StatCard label="Profit Factor" value={fmt(s.profit_factor)}         color={s.profit_factor>=1.5?C.accent:C.red}/>
+            <StatCard label="Max Drawdown"  value={`-${fmt(s.max_drawdown)}%`}   color={C.red}/>
+            <StatCard label="Sharpe"        value={fmt(s.sharpe)}                color={s.sharpe>=1?C.accent:C.muted}/>
+            <StatCard label="Max Consec W"  value={s.max_consec_wins}            color={C.accent}/>
+            <StatCard label="Max Consec L"  value={s.max_consec_losses}          color={C.red}/>
+            <StatCard label="Avg Win $"     value={`$${fmt(s.avg_win,3)}`}       color={C.accent}/>
+            <StatCard label="Avg Loss $"    value={`$${fmt(s.avg_loss,3)}`}      color={C.red}/>
             <StatCard label="Kelly Full"    value={`${fmt(s.kelly_full*100,1)}%`} color={C.gold} sub="optimal risk"/>
           </div>
+
+          {/* Charts */}
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
             <div style={{display:"flex",borderBottom:`1px solid ${C.border}`}}>
-              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL"]].map(([id,label])=>(
-                <button key={id} onClick={()=>setTab(id)} style={{
-                  flex:1,padding:"10px 8px",background:tab===id?C.card:"transparent",
-                  color:tab===id?C.accent:C.muted,border:"none",
-                  borderBottom:tab===id?`2px solid ${C.accent}`:"2px solid transparent",
+              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL Bar"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setChartTab(id)} style={{
+                  flex:1,padding:"10px 8px",background:chartTab===id?C.card:"transparent",
+                  color:chartTab===id?C.accent:C.muted,border:"none",
+                  borderBottom:chartTab===id?`2px solid ${C.accent}`:"2px solid transparent",
                   fontSize:10,cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
                 }}>{label}</button>
               ))}
             </div>
             <div style={{padding:"16px 8px"}}>
-              {tab==="curve"&&(
+              {chartTab==="curve" && (
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={result.equity_curve} margin={{top:4,right:4,left:0,bottom:0}}>
                     <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={col} stopOpacity={0.3}/>
+                      <stop offset="5%"  stopColor={col} stopOpacity={0.3}/>
                       <stop offset="95%" stopColor={col} stopOpacity={0}/>
                     </linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
@@ -398,7 +403,7 @@ function SingleTab(){
                   </AreaChart>
                 </ResponsiveContainer>
               )}
-              {tab==="dd"&&(
+              {chartTab==="dd" && (
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={result.equity_curve.map((d,i,arr)=>{
                     const peak=Math.max(...arr.slice(0,i+1).map(x=>x.eq));
@@ -412,7 +417,7 @@ function SingleTab(){
                   </AreaChart>
                 </ResponsiveContainer>
               )}
-              {tab==="pnl"&&(
+              {chartTab==="pnl" && (
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={result.trades} margin={{top:4,right:4,left:0,bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
@@ -427,7 +432,7 @@ function SingleTab(){
             </div>
           </div>
 
-          {/* Trade log with P1/P2/P3/Fib columns */}
+          {/* Trade log */}
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
             <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
               Trade Log · Last {result.trades.length} trades
@@ -435,7 +440,7 @@ function SingleTab(){
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
                 <thead><tr style={{background:C.bg}}>
-                  {["#","Dir","P1 Time","Entry Date","P1","P2","P3","Fib618","Entry","SL","TP","Exit","Result","PnL","Equity"].map(h=>(
+                  {["#","Dir","Entry Time","P1","P2","P3","Fib618","Fill","SL","TP","Exit","Result","PnL","Equity"].map(h=>(
                     <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr></thead>
@@ -446,13 +451,12 @@ function SingleTab(){
                       <td style={{padding:"6px 10px"}}>
                         <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
                       </td>
-                      <td style={{padding:"6px 10px",color:C.gold,whiteSpace:"nowrap"}}>{t.p1_time ? new Date(t.p1_time).toLocaleString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—"}</td>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{new Date(t.entry_time).toLocaleDateString()}</td>
+                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.entry_time)}</td>
                       <td style={{padding:"6px 10px",color:C.gold}}>{t.p1||"—"}</td>
                       <td style={{padding:"6px 10px",color:C.blue}}>{t.p2||"—"}</td>
                       <td style={{padding:"6px 10px",color:C.gold}}>{t.p3||"—"}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{t.fib_entry||"—"}</td>
-                      <td style={{padding:"6px 10px"}}>{t.entry}</td>
+                      <td style={{padding:"6px 10px",fontWeight:700}}>{t.entry}</td>
                       <td style={{padding:"6px 10px",color:C.red}}>{t.sl}</td>
                       <td style={{padding:"6px 10px",color:C.accent}}>{t.tp}</td>
                       <td style={{padding:"6px 10px"}}>{t.exit_price}</td>
@@ -467,21 +471,21 @@ function SingleTab(){
           </div>
         </div>
       )}
-      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Configure above and hit <span style={{color:C.accent}}>▶ RUN BACKTEST</span></div>}
+      {status==="idle" && <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Configure above and hit <span style={{color:C.accent}}>▶ RUN BACKTEST</span></div>}
     </div>
   );
 }
 
-// ── MATRIX TAB ────────────────────────────────────────────
-function MatrixTab(){
-  const [selPairs,      setSelPairs]      = useState(["SOL/USDT","BTC/USDT","XRP/USDT"]);
+// ── MATRIX TAB ─────────────────────────────────────────────────
+function MatrixTab() {
+  const [selPairs,      setSelPairs]      = useState(["ETH/USDT","BTC/USDT","XRP/USDT"]);
   const [selTfs,        setSelTfs]        = useState(["1m"]);
   const [selRisks,      setSelRisks]      = useState(["fixed"]);
-  const [selPivots,     setSelPivots]     = useState([3]);
+  const [selPivots,     setSelPivots]     = useState([8]);
   const [selRR,         setSelRR]         = useState([1.5,2]);
   const [selFibs,       setSelFibs]       = useState([0.618]);
-  const [selEngines,    setSelEngines]    = useState(["original","classic","classic_v2","structure"]);
-  const [selEntryModes, setSelEntryModes] = useState(["rejection"]);
+  const [selEngines,    setSelEngines]    = useState(["original"]);
+  const [selEntryModes, setSelEntryModes] = useState(["touch"]);
   const [period,        setPeriod]        = useState(3);
   const [status,        setStatus]        = useState("idle");
   const [results,       setResults]       = useState([]);
@@ -491,62 +495,71 @@ function MatrixTab(){
   const [sortDir,       setSortDir]       = useState("desc");
   const [error,         setError]         = useState("");
 
-  const ALL_ENGINES    = ["original","classic","classic_v2","structure"];
-  const ALL_ENTRY      = ["touch","rejection","reclaim"];
-  const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
-  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length;
+  const tog = (arr,setArr,val) => setArr(toggle(arr,val));
+  const totalCombos = selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length;
 
-  const run=useCallback(async()=>{
-    if(!totalCombos) return;
+  const run = useCallback(async () => {
+    if (!totalCombos) return;
     setStatus("loading"); setResults([]); setProgress(0); setError("");
-    const {start,end}=getPeriodDates(PERIODS[period]);
-    const configs=[];
+    const {start,end} = getPeriodDates(PERIODS[period]);
+    const configs = [];
     for(const sym of selPairs) for(const tf of selTfs) for(const risk of selRisks)
       for(const pn of selPivots) for(const rr of selRR) for(const fib of selFibs)
         for(const eng of selEngines) for(const em of selEntryModes)
           configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,
-            pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,
-            engine:eng,entry_mode:em});
+            pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,engine:eng,entry_mode:em});
     setTotal(configs.length);
-    const allResults=[];
-    for(let i=0;i<configs.length;i+=8){
-      const batch=configs.slice(i,i+8);
-      try{
-        const res=await fetch(`${API}/batch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configs:batch})});
-        const data=await res.json();
-        if(data.success){allResults.push(...data.results);setProgress(allResults.length);setResults([...allResults]);}
-      }catch(e){setError(e.message);}
+    const allResults = [];
+    for(let i=0; i<configs.length; i+=8) {
+      const batch = configs.slice(i,i+8);
+      try {
+        const res  = await fetch(`${API}/batch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configs:batch})});
+        const data = await res.json();
+        if(data.success) { allResults.push(...data.results); setProgress(allResults.length); setResults([...allResults]); }
+      } catch(e) { setError(e.message); }
     }
     setStatus("done");
-  },[selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos]);
+  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos]);
 
-  const sorted=useMemo(()=>{
-    const ok=results.filter(r=>r.success&&r.stats);
+  const sorted = useMemo(() => {
+    const ok = results.filter(r=>r.success&&r.stats);
     return [...ok].sort((a,b)=>{
       const va=a.stats[sortKey]??0, vb=b.stats[sortKey]??0;
       return sortDir==="desc"?vb-va:va-vb;
     });
-  },[results,sortKey,sortDir]);
+  }, [results,sortKey,sortDir]);
 
-  const handleSort=(k)=>{if(sortKey===k)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortKey(k);setSortDir("desc");}};
-  const SortTh=({k,label})=>(
+  const handleSort = (k) => { if(sortKey===k) setSortDir(d=>d==="desc"?"asc":"desc"); else { setSortKey(k); setSortDir("desc"); } };
+  const SortTh = ({k,label}) => (
     <th className="sortable" onClick={()=>handleSort(k)} style={{padding:"8px 10px",color:sortKey===k?C.accent:C.muted,textAlign:"right",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>
       {label}{sortKey===k?(sortDir==="desc"?" ↓":" ↑"):""}
     </th>
   );
 
+  const exportCSV = () => {
+    const headers=["Pair","TF","Risk","N","RR","Fib","Engine","EntryMode","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","KellyFull"];
+    const rows=sorted.map(r=>{const s=r.stats;return[
+      r.symbol.replace("/USDT",""),r.timeframe,r.risk_method,r.pivot_n,r.rr,r.fib_level||0.618,
+      r.engine||"—",r.entry_mode||"—",
+      s.total_return,s.cagr,s.max_drawdown,s.sharpe,s.profit_factor,s.win_rate,s.total_trades,
+      s.avg_win,s.avg_loss,s.kelly_full
+    ].join(",");});
+    const csv=[headers.join(","),...rows].join("\n");
+    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="waddle_matrix.csv";a.click();
+  };
+
   return (
     <div>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
         {[
-          ["Pairs",       ALL_PAIRS,      selPairs,      setSelPairs,      p=>p.replace("/USDT","")],
-          ["Timeframes",  ALL_TIMEFRAMES, selTfs,        setSelTfs,        t=>t.toUpperCase()],
-          ["Risk Methods",ALL_RISKS,      selRisks,      setSelRisks,      fmtRisk],
-          ["Pivot N",     ALL_PIVOTS,     selPivots,     setSelPivots,     n=>`N=${n}`],
-          ["Risk:Reward", ALL_RR,         selRR,         setSelRR,         r=>`${r}R`],
-          ["Fib Level",   ALL_FIBS,       selFibs,       setSelFibs,       f=>`${f}`],
-          ["Engine",      ALL_ENGINES,    selEngines,    setSelEngines,    e=>e],
-          ["Entry Mode",  ALL_ENTRY,      selEntryModes, setSelEntryModes, e=>e],
+          ["Pairs",       ALL_PAIRS,    selPairs,      setSelPairs,      p=>p.replace("/USDT","")],
+          ["Timeframes",  ALL_TIMEFRAMES,selTfs,       setSelTfs,        t=>t.toUpperCase()],
+          ["Risk Methods",ALL_RISKS,    selRisks,      setSelRisks,      fmtRisk],
+          ["Pivot N",     ALL_PIVOTS,   selPivots,     setSelPivots,     n=>`N=${n}`],
+          ["Risk:Reward", ALL_RR,       selRR,         setSelRR,         r=>`${r}R`],
+          ["Fib Level",   ALL_FIBS,     selFibs,       setSelFibs,       f=>`${f}`],
+          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>e],
+          ["Entry Mode",  ALL_ENTRY,    selEntryModes, setSelEntryModes, e=>e],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
             <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
@@ -563,47 +576,35 @@ function MatrixTab(){
           borderRadius:8,padding:"12px 20px",fontSize:13,fontWeight:800,
           cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
         }}>{status==="loading"?`⟳ ${progress}/${total} running...`:`▶ RUN MATRIX (${totalCombos} combos)`}</button>
-        {status==="loading"&&<ProgressBar value={progress} total={total}/>}
-        {error&&<div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
+        {status==="loading" && <ProgressBar value={progress} total={total}/>}
+        {error && <div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
       </div>
 
-      {sorted.length>0&&(
+      {sorted.length>0 && (
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>{sorted.length} combinations</span>
-            {sorted[0]&&<span style={{fontSize:10,color:C.accent}}>
-              Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} N={sorted[0].pivot_n} {sorted[0].rr}R {sorted[0].fib_level} [{sorted[0].engine||"—"}] [{sorted[0].entry_mode||"—"}]
+            {sorted[0] && <span style={{fontSize:10,color:C.accent}}>
+              Best: {sorted[0].symbol.replace("/USDT","")} {sorted[0].timeframe?.toUpperCase()} N={sorted[0].pivot_n} {sorted[0].rr}R [{sorted[0].engine||"—"}] [{sorted[0].entry_mode||"—"}]
             </span>}
-            <button onClick={()=>{
-              const headers=["Pair","TF","Risk","N","RR","Fib","Engine","EntryMode","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","MaxCWins","MaxCLoss","KellyFull","KellyHalf","FinalEquity"];
-              const rows=sorted.map(r=>{const s=r.stats;return[
-                r.symbol.replace("/USDT",""),r.timeframe,r.risk_method,r.pivot_n,r.rr,r.fib_level||0.618,
-                r.engine||"—",r.entry_mode||"—",
-                s.total_return,s.cagr,s.max_drawdown,s.sharpe,s.profit_factor,s.win_rate,s.total_trades,
-                s.avg_win,s.avg_loss,s.max_consec_wins,s.max_consec_losses,s.kelly_full,s.kelly_half,s.final_equity
-              ].join(",");});
-              const csv=[headers.join(","),...rows].join("\n");
-              const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="waddle_matrix_results.csv";a.click();
-            }} style={{marginLeft:"auto",padding:"4px 12px",background:"transparent",border:`1px solid ${C.accent}`,borderRadius:6,color:C.accent,fontSize:10,cursor:"pointer"}}>⬇ Export CSV</button>
+            <button onClick={exportCSV} style={{marginLeft:"auto",padding:"4px 12px",background:"transparent",border:`1px solid ${C.accent}`,borderRadius:6,color:C.accent,fontSize:10,cursor:"pointer"}}>⬇ Export CSV</button>
           </div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
               <thead><tr style={{background:C.bg}}>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Pair</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>TF</th>
-                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
-                <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Fib</th>
                 <th style={{padding:"8px 10px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Engine</th>
                 <th style={{padding:"8px 10px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Entry</th>
-                <SortTh k="total_return" label="Return %"/>
-                <SortTh k="cagr" label="CAGR %"/>
-                <SortTh k="max_drawdown" label="Max DD %"/>
-                <SortTh k="sharpe" label="Sharpe"/>
+                <SortTh k="total_return"  label="Return %"/>
+                <SortTh k="cagr"          label="CAGR %"/>
+                <SortTh k="max_drawdown"  label="Max DD %"/>
+                <SortTh k="sharpe"        label="Sharpe"/>
                 <SortTh k="profit_factor" label="PF"/>
-                <SortTh k="win_rate" label="WR %"/>
-                <SortTh k="total_trades" label="Trades"/>
+                <SortTh k="win_rate"      label="WR %"/>
+                <SortTh k="total_trades"  label="Trades"/>
               </tr></thead>
               <tbody>
                 {sorted.map((r,i)=>{
@@ -612,15 +613,13 @@ function MatrixTab(){
                     <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:isTop?C.accentDim:"transparent"}}>
                       <td style={{padding:"6px 10px",fontWeight:isTop?700:400,color:isTop?C.accent:C.text}}>{r.symbol.replace("/USDT","")}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{r.timeframe?.toUpperCase()}</td>
-                      <td style={{padding:"6px 10px",color:C.muted}}>{fmtRisk(r.risk_method)}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{r.pivot_n}</td>
                       <td style={{padding:"6px 10px",color:C.gold}}>{r.rr}R</td>
-                      <td style={{padding:"6px 10px",color:C.muted}}>{r.fib_level||0.618}</td>
                       <td style={{padding:"6px 10px"}}>
-                        <span style={{background:C.accentDim,color:C.accent,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{r.engine||"—"}</span>
+                        <span style={{background:C.accentDim,color:C.accent,padding:"2px 6px",borderRadius:3,fontSize:8,fontWeight:700}}>{r.engine||"—"}</span>
                       </td>
                       <td style={{padding:"6px 10px"}}>
-                        <span style={{background:C.blueDim,color:C.blue,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{r.entry_mode||"—"}</span>
+                        <span style={{background:C.blueDim,color:C.blue,padding:"2px 6px",borderRadius:3,fontSize:8,fontWeight:700}}>{r.entry_mode||"—"}</span>
                       </td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red,fontWeight:700}}>{g?"+":""}{fmt(s.total_return)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt(s.cagr)}%</td>
@@ -637,83 +636,79 @@ function MatrixTab(){
           </div>
         </div>
       )}
-      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select variables and hit <span style={{color:C.accent}}>▶ RUN MATRIX</span></div>}
+      {status==="idle" && <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select variables and hit <span style={{color:C.accent}}>▶ RUN MATRIX</span></div>}
     </div>
   );
 }
 
-// ── COMPARE TAB ───────────────────────────────────────────
-function CompareTab(){
-  const [selPairs,      setSelPairs]      = useState(["ETH/USDT","BTC/USDT","INJ/USDT","SOL/USDT"]);
-  const [selTfs,        setSelTfs]        = useState(["4h"]);
+// ── COMPARE TAB ────────────────────────────────────────────────
+function CompareTab() {
+  const [selPairs,      setSelPairs]      = useState(["ETH/USDT","BTC/USDT","SOL/USDT"]);
+  const [selTfs,        setSelTfs]        = useState(["1m"]);
   const [selRisks,      setSelRisks]      = useState(["fixed"]);
-  const [selPivots,     setSelPivots]     = useState([5]);
-  const [selRR,         setSelRR]         = useState([2,3]);
+  const [selPivots,     setSelPivots]     = useState([8]);
+  const [selRR,         setSelRR]         = useState([2]);
   const [selFibs,       setSelFibs]       = useState([0.618]);
-  const [selEngines,    setSelEngines]    = useState(["structure"]);
-  const [selEntryModes, setSelEntryModes] = useState(["rejection"]);
+  const [selEngines,    setSelEngines]    = useState(["original"]);
+  const [selEntryModes, setSelEntryModes] = useState(["touch"]);
+  const [periodA,       setPeriodA]       = useState({label:"2025 Full",start:"2025-01-01",end:"2026-01-01"});
+  const [periodB,       setPeriodB]       = useState({label:"2026 YTD", start:"2026-01-01",end:"now"});
+  const [status,        setStatus]        = useState("idle");
+  const [results,       setResults]       = useState([]);
+  const [sortKey,       setSortKey]       = useState("consistency_score");
+  const [sortDir,       setSortDir]       = useState("desc");
+  const [filter,        setFilter]        = useState("all");
+  const [error,         setError]         = useState("");
 
-  const ALL_ENGINES = ["original","classic","classic_v2","structure"];
-  const ALL_ENTRY   = ["touch","rejection","reclaim"];
-  const [periodA,   setPeriodA]   = useState({label:"2025 Full", start:"2025-01-01", end:"2026-01-01"});
-  const [periodB,   setPeriodB]   = useState({label:"2026 YTD",  start:"2026-01-01", end:"now"});
-  const [status,    setStatus]    = useState("idle");
-  const [results,   setResults]   = useState([]);
-  const [sortKey,   setSortKey]   = useState("consistency_score");
-  const [sortDir,   setSortDir]   = useState("desc");
-  const [filter,    setFilter]    = useState("all");
-  const [error,     setError]     = useState("");
-
-  const tog=(arr,setArr,val)=>setArr(toggle(arr,val));
-  const totalCombos=selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length;
-
-  const PERIOD_PRESETS=[
-    {label:"Last 7 Days",  start:null, end:"now", days:7},
+  const PERIOD_PRESETS = [
     {label:"Last 30 Days", start:null, end:"now", days:30},
     {label:"Last 90 Days", start:null, end:"now", days:90},
     {label:"2025 Full",    start:"2025-01-01", end:"2026-01-01"},
     {label:"2026 YTD",     start:"2026-01-01", end:"now"},
   ];
 
-  const run=useCallback(async()=>{
-    if(!totalCombos) return;
+  const tog = (arr,setArr,val) => setArr(toggle(arr,val));
+  const totalCombos = selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length;
+
+  const getStart = (p) => {
+    if (p.start) return p.start;
+    const d = new Date(Date.now() - p.days*86400000);
+    return d.toISOString().split("T")[0];
+  };
+
+  const run = useCallback(async () => {
+    if (!totalCombos) return;
     setStatus("loading"); setResults([]); setError("");
-    const getStart = (p) => {
-      if(p.start) return p.start;
-      const d=new Date(Date.now()-p.days*86400000);
-      return d.toISOString().split("T")[0];
-    };
-    try{
-      const res=await fetch(`${API}/compare`,{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          symbols:selPairs,timeframes:selTfs,pivot_ns:selPivots,
-          risk_methods:selRisks,rr_ratios:selRR,fib_levels:selFibs,
-          engines:selEngines,entry_modes:selEntryModes,
-          period_a_start:getStart(periodA),period_a_end:periodA.end,
-          period_b_start:getStart(periodB),period_b_end:periodB.end,
+    try {
+      const res = await fetch(`${API}/compare`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          symbols:selPairs, timeframes:selTfs, pivot_ns:selPivots,
+          risk_methods:selRisks, rr_ratios:selRR, fib_levels:selFibs,
+          engines:selEngines, entry_modes:selEntryModes,
+          period_a_start:getStart(periodA), period_a_end:periodA.end,
+          period_b_start:getStart(periodB), period_b_end:periodB.end,
         })
       });
-      const data=await res.json();
-      if(!data.success) throw new Error(data.error||"Compare failed");
-      setResults(data.results);
-      setStatus("done");
-    }catch(e){setError(e.message);setStatus("error");}
-  },[selPairs,selTfs,selRisks,selPivots,selRR,periodA,periodB,totalCombos]);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error||"Compare failed");
+      setResults(data.results); setStatus("done");
+    } catch(e) { setError(e.message); setStatus("error"); }
+  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,periodA,periodB,totalCombos]);
 
-  const filtered=useMemo(()=>{
-    let r=[...results];
-    if(filter==="both_positive") r=r.filter(x=>x.both_positive);
-    if(filter==="top20") r=r.slice(0,20);
+  const filtered = useMemo(() => {
+    let r = [...results];
+    if (filter==="both_positive") r = r.filter(x=>x.both_positive);
+    if (filter==="top20") r = r.slice(0,20);
     return [...r].sort((a,b)=>{
       const va=a[sortKey]??0, vb=b[sortKey]??0;
       return sortDir==="desc"?vb-va:va-vb;
     });
-  },[results,filter,sortKey,sortDir]);
+  }, [results,filter,sortKey,sortDir]);
 
-  const handleSort=(k)=>{if(sortKey===k)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortKey(k);setSortDir("desc");}};
-  const SortTh=({k,label})=>(
-    <th className="sortable" onClick={()=>handleSort(k)} style={{padding:"8px 8px",color:sortKey===k?C.accent:C.muted,textAlign:"right",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>
+  const handleSort = (k) => { if(sortKey===k) setSortDir(d=>d==="desc"?"asc":"desc"); else { setSortKey(k); setSortDir("desc"); } };
+  const SortTh = ({k,label}) => (
+    <th className="sortable" onClick={()=>handleSort(k)} style={{padding:"8px 8px",color:sortKey===k?C.gold:C.muted,textAlign:"right",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>
       {label}{sortKey===k?(sortDir==="desc"?" ↓":" ↑"):""}
     </th>
   );
@@ -721,8 +716,9 @@ function CompareTab(){
   return (
     <div>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        {/* Period pickers */}
         <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Period A vs Period B</span>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Periods A vs B</span>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <div>
               <div style={{fontSize:9,color:C.accent,marginBottom:6}}>PERIOD A</div>
@@ -730,8 +726,8 @@ function CompareTab(){
                 <div key={p.label} onClick={()=>setPeriodA(p)} style={{
                   background:periodA.label===p.label?C.accentDim:C.card,
                   border:`1px solid ${periodA.label===p.label?C.accent:C.border}`,
-                  borderRadius:6,padding:"7px 10px",cursor:"pointer",
-                  fontSize:11,color:periodA.label===p.label?C.accent:C.muted,marginBottom:4
+                  borderRadius:6,padding:"7px 10px",cursor:"pointer",fontSize:11,
+                  color:periodA.label===p.label?C.accent:C.muted,marginBottom:4
                 }}>{p.label}</div>
               ))}
             </div>
@@ -741,8 +737,8 @@ function CompareTab(){
                 <div key={p.label} onClick={()=>setPeriodB(p)} style={{
                   background:periodB.label===p.label?C.goldDim:C.card,
                   border:`1px solid ${periodB.label===p.label?C.gold:C.border}`,
-                  borderRadius:6,padding:"7px 10px",cursor:"pointer",
-                  fontSize:11,color:periodB.label===p.label?C.gold:C.muted,marginBottom:4
+                  borderRadius:6,padding:"7px 10px",cursor:"pointer",fontSize:11,
+                  color:periodB.label===p.label?C.gold:C.muted,marginBottom:4
                 }}>{p.label}</div>
               ))}
             </div>
@@ -750,14 +746,14 @@ function CompareTab(){
         </div>
 
         {[
-          ["Pairs",       ALL_PAIRS,      selPairs,      setSelPairs,      p=>p.replace("/USDT","")],
-          ["Timeframes",  ALL_TIMEFRAMES, selTfs,        setSelTfs,        t=>t.toUpperCase()],
-          ["Risk Methods",ALL_RISKS,      selRisks,      setSelRisks,      fmtRisk],
-          ["Pivot N",     ALL_PIVOTS,     selPivots,     setSelPivots,     n=>`N=${n}`],
-          ["Risk:Reward", ALL_RR,         selRR,         setSelRR,         r=>`${r}R`],
-          ["Fib Level",   ALL_FIBS,       selFibs,       setSelFibs,       f=>`${f}`],
-          ["Engine",      ALL_ENGINES,    selEngines,    setSelEngines,    e=>e],
-          ["Entry Mode",  ALL_ENTRY,      selEntryModes, setSelEntryModes, e=>e],
+          ["Pairs",       ALL_PAIRS,    selPairs,      setSelPairs,      p=>p.replace("/USDT","")],
+          ["Timeframes",  ALL_TIMEFRAMES,selTfs,       setSelTfs,        t=>t.toUpperCase()],
+          ["Risk Methods",ALL_RISKS,    selRisks,      setSelRisks,      fmtRisk],
+          ["Pivot N",     ALL_PIVOTS,   selPivots,     setSelPivots,     n=>`N=${n}`],
+          ["Risk:Reward", ALL_RR,       selRR,         setSelRR,         r=>`${r}R`],
+          ["Fib Level",   ALL_FIBS,     selFibs,       setSelFibs,       f=>`${f}`],
+          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>e],
+          ["Entry Mode",  ALL_ENTRY,    selEntryModes, setSelEntryModes, e=>e],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
             <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
@@ -768,21 +764,20 @@ function CompareTab(){
         ))}
 
         <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
-          background:status==="loading"||!totalCombos?C.dim:C.gold,
-          color:C.bg,border:"none",borderRadius:8,padding:"12px 20px",
-          fontSize:13,fontWeight:800,cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",
-          letterSpacing:"0.08em",width:"100%"
-        }}>{status==="loading"?"⟳ COMPARING...`":`⚖ COMPARE ${totalCombos} COMBOS × 2 PERIODS`}</button>
-        {error&&<div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
+          background:status==="loading"||!totalCombos?C.dim:C.gold,color:C.bg,border:"none",
+          borderRadius:8,padding:"12px 20px",fontSize:13,fontWeight:800,
+          cursor:status==="loading"||!totalCombos?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
+        }}>{status==="loading"?"⟳ COMPARING...":`⚖ COMPARE ${totalCombos} COMBOS × 2 PERIODS`}</button>
+        {error && <div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {error}</div>}
       </div>
 
-      {results.length>0&&(
+      {results.length>0 && (
         <div>
-          {filtered[0]&&(
+          {filtered[0] && (
             <div style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:12,padding:"14px 18px",marginBottom:16}}>
               <div style={{fontSize:10,color:C.gold,letterSpacing:"0.1em",marginBottom:6}}>⭐ MOST CONSISTENT</div>
               <div style={{fontSize:18,fontWeight:800,color:C.text}}>
-                {filtered[0].symbol.replace("/USDT","")} {filtered[0].timeframe?.toUpperCase()} · {fmtRisk(filtered[0].risk)} · N={filtered[0].pivot_n} · {filtered[0].rr}R
+                {filtered[0].symbol.replace("/USDT","")} {filtered[0].timeframe?.toUpperCase()} · N={filtered[0].pivot_n} · {filtered[0].rr}R · [{filtered[0].engine}]
               </div>
               <div style={{fontSize:12,color:C.muted,marginTop:4}}>
                 {periodA.label}: <span style={{color:filtered[0].period_a_return>=0?C.accent:C.red,fontWeight:700}}>{filtered[0].period_a_return>=0?"+":""}{fmt(filtered[0].period_a_return)}%</span>
@@ -796,19 +791,12 @@ function CompareTab(){
           <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             {[["all","All"],["both_positive","Both Positive"],["top20","Top 20"]].map(([v,l])=>(
               <div key={v} onClick={()=>setFilter(v)} style={{
-                background:filter===v?C.accentDim:C.card,
-                border:`1px solid ${filter===v?C.accent:C.border}`,
+                background:filter===v?C.goldDim:C.card,border:`1px solid ${filter===v?C.gold:C.border}`,
                 borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:10,
-                color:filter===v?C.accent:C.muted
+                color:filter===v?C.gold:C.muted
               }}>{l}</div>
             ))}
             <div style={{marginLeft:"auto",fontSize:10,color:C.muted,alignSelf:"center"}}>{filtered.length} results</div>
-            <button onClick={()=>{
-              const headers=["Pair","TF","Risk","N","RR","Fib","Engine","EntryMode","Return%A","Return%B","AvgRet","AvgDD","Sharpe","Score"];
-              const rows=sorted.map(r=>[r.symbol.replace("/USDT",""),r.timeframe,r.risk_method||r.risk,r.pivot_n,r.rr,r.fib_level||0.618,r.engine||"—",r.entry_mode||"—",r.period_a_return,r.period_b_return,r.avg_return,r.avg_dd,r.avg_sharpe,r.consistency_score].join(","));
-              const csv=[headers.join(","),...rows].join("\n");
-              const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="waddle_matrix_results.csv";a.click();
-            }} style={{marginLeft:8,padding:"4px 10px",background:"transparent",border:`1px solid ${C.accent}`,borderRadius:6,color:C.accent,fontSize:10,cursor:"pointer"}}>⬇ Export CSV</button>
           </div>
 
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
@@ -817,17 +805,16 @@ function CompareTab(){
                 <thead><tr style={{background:C.bg}}>
                   <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Pair</th>
                   <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>TF</th>
-                  <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Risk</th>
                   <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>N</th>
                   <th style={{padding:"8px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
                   <th style={{padding:"8px 8px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Engine</th>
                   <th style={{padding:"8px 8px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Entry</th>
-                  <SortTh k="period_a_return" label={`${periodA.label} %`}/>
-                  <SortTh k="period_b_return" label={`${periodB.label} %`}/>
-                  <SortTh k="avg_return"      label="Avg Ret"/>
-                  <SortTh k="avg_dd"          label="Avg DD"/>
-                  <SortTh k="avg_sharpe"      label="Sharpe"/>
-                  <SortTh k="consistency_score" label="Score ⭐"/>
+                  <SortTh k="period_a_return"    label={`${periodA.label} %`}/>
+                  <SortTh k="period_b_return"    label={`${periodB.label} %`}/>
+                  <SortTh k="avg_return"         label="Avg Ret"/>
+                  <SortTh k="avg_dd"             label="Avg DD"/>
+                  <SortTh k="avg_sharpe"         label="Sharpe"/>
+                  <SortTh k="consistency_score"  label="Score ⭐"/>
                 </tr></thead>
                 <tbody>
                   {filtered.map((r,i)=>{
@@ -837,7 +824,6 @@ function CompareTab(){
                       <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:rowBg}}>
                         <td style={{padding:"6px 8px",fontWeight:isTop?700:400,color:isTop?C.gold:C.text}}>{r.symbol.replace("/USDT","")}</td>
                         <td style={{padding:"6px 8px",color:C.muted}}>{r.timeframe?.toUpperCase()}</td>
-                        <td style={{padding:"6px 8px",color:C.muted}}>{fmtRisk(r.risk||r.risk_method)}</td>
                         <td style={{padding:"6px 8px",color:C.muted}}>{r.pivot_n}</td>
                         <td style={{padding:"6px 8px",color:C.gold}}>{r.rr}R</td>
                         <td style={{padding:"6px 8px"}}>
@@ -861,288 +847,147 @@ function CompareTab(){
           </div>
         </div>
       )}
-      {status==="idle"&&<div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select periods and variables, then hit <span style={{color:C.gold}}>⚖ COMPARE</span></div>}
+      {status==="idle" && <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Select periods and variables, then hit <span style={{color:C.gold}}>⚖ COMPARE</span></div>}
     </div>
   );
 }
 
+// ── PREFETCH TAB ───────────────────────────────────────────────
+function PrefetchTab() {
+  const [symbol,    setSymbol]    = useState("ETH/USDT");
+  const [tf,        setTf]        = useState("1m");
+  const [startDate, setStartDate] = useState("2025-01-01");
+  const [endDate,   setEndDate]   = useState("2026-06-01");
+  const [status,    setStatus]    = useState(null);
+  const [polling,   setPolling]   = useState(false);
+  const [jobStatus, setJobStatus] = useState(null);
 
-// ── JOURNAL TAB ───────────────────────────────────────────
-function LiveJournalTab(){
-  const [account,  setAccount]  = useState(null);
-  const [trades,   setTrades]   = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState("");
-  const [filterPair,   setFilterPair]   = useState("all");
-  const [filterResult, setFilterResult] = useState("all");
-  const [tab,      setTab]      = useState("overview");
-
-  const load = useCallback(async()=>{
-    setLoading(true); setError("");
-    try{
-      const res = await fetch(`${API}/live-journal`);
+  const prefetch = async () => {
+    setStatus("queuing"); setJobStatus(null);
+    try {
+      const res  = await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,timeframe:tf,start_date:startDate,end_date:endDate})});
       const data = await res.json();
-      if(data.success){
-        setAccount(data.account||null);
-        setTrades(Array.isArray(data.trades)?data.trades:[]);
-      } else throw new Error(data.error||"Failed");
-    }catch(e){ setError(e.message); }
-    setLoading(false);
-  },[]);
+      setStatus(data.status);
+      setPolling(true);
+    } catch(e) { setStatus("error"); }
+  };
 
-  useEffect(()=>{ load(); },[]);
+  useEffect(() => {
+    if (!polling) return;
+    const interval = setInterval(async () => {
+      try {
+        const res  = await fetch(`${API}/prefetch-status?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}&start_date=${startDate}&end_date=${endDate}`);
+        const data = await res.json();
+        setJobStatus(data);
+        if (data.job_status === "done" || data.job_status === "error") setPolling(false);
+      } catch(e) {}
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [polling, symbol, tf, startDate, endDate]);
 
-  const pairs = useMemo(()=>["all",...new Set(trades.map(t=>t.symbol))],[trades]);
-
-  const filtered = useMemo(()=>trades.filter(t=>{
-    if(filterPair!=="all"&&t.symbol!==filterPair) return false;
-    if(filterResult==="win"&&!t.won) return false;
-    if(filterResult==="loss"&&t.won) return false;
-    return true;
-  }),[trades,filterPair,filterResult]);
-
-  const stats = useMemo(()=>{
-    if(!filtered.length) return null;
-    const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
-    const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
-    const wr=wins.length/filtered.length*100;
-    const avgWin=wins.length?wins.reduce((a,t)=>a+(t.pnl||0),0)/wins.length:0;
-    const avgLoss=losses.length?Math.abs(losses.reduce((a,t)=>a+(t.pnl||0),0)/losses.length):0;
-    const pf=avgLoss>0?avgWin/avgLoss:999;
-    let maxCW=0,maxCL=0,cw=0,cl=0;
-    [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
-    return{wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
-  },[filtered]);
-
-  const equityCurve = useMemo(()=>{
-    if(!account) return [];
-    let eq = account.start_balance || 100;
-    return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
-  },[filtered,account]);
-
-  const pnlByPair = useMemo(()=>{
-    const map={};
-    filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
-    return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
-  },[filtered]);
-
-  const fmtDate=(s)=>s?new Date(s).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
-  const startBal = account?.start_balance || 100;
-  const totalReturn = account?Math.round(((account.balance-startBal)/startBal*100)*100)/100:0;
-  const green = totalReturn>=0;
-  const col = green?C.accent:C.red;
-  const sel2={background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
-
-  if(loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading live journal...</div>;
-  if(error) return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
+  const pct = jobStatus?.completeness_pct || 0;
+  const ready = jobStatus?.ready;
 
   return (
     <div>
-      {/* Live badge */}
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-        <div style={{width:8,height:8,borderRadius:"50%",background:C.red,boxShadow:`0 0 8px ${C.red}`}}/>
-        <span style={{fontSize:10,color:C.red,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700}}>Live Trading Account</span>
-      </div>
-
-      {/* Account Banner */}
-      {account?(
-        <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:14}}>
+          Pre-load candle data into Supabase cache
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <Sel label="Pair"      value={symbol} onChange={setSymbol} options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
+          <Sel label="Timeframe" value={tf}     onChange={setTf}     options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
           <div>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>LIVE BALANCE</div>
-            <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(account.balance)}</div>
+            <div style={{fontSize:9,color:C.muted,marginBottom:4}}>START DATE</div>
+            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} style={{
+              width:"100%",background:C.card,color:C.text,border:`1px solid ${C.border}`,
+              borderRadius:6,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit"
+            }}/>
           </div>
-          <div style={{flex:1,minWidth:180}}>
-            <div style={{fontSize:13,marginBottom:4}}>Total Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
-            <div style={{fontSize:11,color:C.muted}}>{account.total_trades||0} trades · {account.wins||0}W / {account.losses||0}L · Max DD -{fmt(account.max_drawdown||0)}%</div>
-            <div style={{fontSize:10,color:C.muted,marginTop:2}}>Started: ${fmt(startBal)}</div>
+          <div>
+            <div style={{fontSize:9,color:C.muted,marginBottom:4}}>END DATE</div>
+            <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} style={{
+              width:"100%",background:C.card,color:C.text,border:`1px solid ${C.border}`,
+              borderRadius:6,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit"
+            }}/>
           </div>
-          <button onClick={load} style={{background:C.card,color:C.red,border:`1px solid ${C.red}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
         </div>
-      ):(
-        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>
-          No live trades yet — bot not started 🤖
-        </div>
-      )}
-
-      {/* Filters */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:16}}>
-        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[
-            ["Pair", filterPair, setFilterPair, pairs, p=>p==="all"?"All Pairs":p],
-            ["Result", filterResult, setFilterResult, ["all","win","loss"], r=>r==="all"?"All Results":r==="win"?"Wins Only":"Losses Only"],
-          ].map(([label,val,setVal,opts,fmtOpt])=>(
-            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
-              <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
-              <select value={val} onChange={e=>setVal(e.target.value)} style={sel2}>
-                {opts.map(o=><option key={o} value={o}>{fmtOpt(o)}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
+        <button onClick={prefetch} disabled={polling} style={{
+          background:polling?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
+          padding:12,fontSize:13,fontWeight:800,cursor:polling?"not-allowed":"pointer",
+          letterSpacing:"0.08em",width:"100%"
+        }}>{polling?"⟳ FETCHING...":"⬇ PREFETCH CANDLES"}</button>
       </div>
 
-      {/* Sub tabs */}
-      <div style={{display:"flex",gap:0,marginBottom:16,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
-        {[["overview","Overview"],["chart","Equity"],["breakdown","By Pair"],["trades","Trade Log"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{
-            flex:1,padding:"10px 4px",background:tab===id?C.card:"transparent",
-            color:tab===id?C.red:C.muted,border:"none",
-            borderBottom:tab===id?`2px solid ${C.red}`:"2px solid transparent",
-            fontSize:9,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {/* Overview */}
-      {tab==="overview"&&(
-        <div>
-          {!stats?(
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ):(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-              <StatCard label="Total Trades"  value={stats.total}/>
-              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`} color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
-              <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
-              <StatCard label="Profit Factor" value={fmt(stats.pf)} color={stats.pf>=1.5?C.accent:C.red}/>
-              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`} color={C.accent}/>
-              <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
-              <StatCard label="Max Consec W"  value={stats.maxCW} color={C.accent}/>
-              <StatCard label="Max Consec L"  value={stats.maxCL} color={C.red}/>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Equity Curve */}
-      {tab==="chart"&&(
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Live Equity Curve</div>
-          {equityCurve.length>1?(
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
-                <defs><linearGradient id="lgrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={col} stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor={col} stopOpacity={0}/>
-                </linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                <XAxis dataKey="t" tickFormatter={t=>new Date(t).toLocaleDateString("en-MY",{month:"short",day:"numeric"})} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={48}/>
-                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                <ReferenceLine y={startBal} stroke={C.muted} strokeDasharray="4 4"/>
-                <Area type="monotone" dataKey="eq" stroke={col} strokeWidth={2} fill="url(#lgrad)" dot={false}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          ):(
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
-          )}
-        </div>
-      )}
-
-      {/* By Pair */}
-      {tab==="breakdown"&&(
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
-          {pnlByPair.length?(
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={pnlByPair} margin={{top:4,right:4,left:0,bottom:0}}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                <XAxis dataKey="name" tick={{fill:C.muted,fontSize:10}} tickLine={false} axisLine={false}/>
-                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
-                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                <ReferenceLine y={0} stroke={C.muted}/>
-                <Bar dataKey="value" radius={[3,3,0,0]} fill={C.red}/>
-              </BarChart>
-            </ResponsiveContainer>
-          ):(
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No data yet</div>
-          )}
-        </div>
-      )}
-
-      {/* Trade Log */}
-      {tab==="trades"&&(
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
-          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-            Live Trade Log · {filtered.length} trades
+      {jobStatus && (
+        <div style={{background:C.surface,border:`1px solid ${ready?C.accent:C.border}`,borderRadius:12,padding:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em"}}>
+              {symbol} {tf.toUpperCase()} · {startDate} → {endDate}
+            </span>
+            <span style={{fontSize:10,fontWeight:700,color:ready?C.accent:C.gold}}>
+              {ready?"✓ READY":"⟳ LOADING"}
+            </span>
           </div>
-          {filtered.length?(
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                <thead><tr style={{background:C.bg}}>
-                  {["#","Pair","Dir","Date","Entry","SL","TP","Exit","Result","P&L","Balance"].map(h=>(
-                    <th key={h} style={{padding:"7px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {filtered.map((t,i)=>(
-                    <tr key={i} style={{borderTop:`1px solid ${C.border}`}}>
-                      <td style={{padding:"6px 8px",color:C.muted}}>{t.id}</td>
-                      <td style={{padding:"6px 8px"}}>{(t.symbol||"").replace("/USDT","")}</td>
-                      <td style={{padding:"6px 8px"}}>
-                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 5px",borderRadius:3,fontSize:8,fontWeight:700}}>{t.direction}</span>
-                      </td>
-                      <td style={{padding:"6px 8px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDate(t.created_at)}</td>
-                      <td style={{padding:"6px 8px"}}>{fmt(t.entry_price,4)}</td>
-                      <td style={{padding:"6px 8px",color:C.red}}>{fmt(t.sl_price,4)}</td>
-                      <td style={{padding:"6px 8px",color:C.accent}}>{fmt(t.tp_price,4)}</td>
-                      <td style={{padding:"6px 8px"}}>{t.exit_price?fmt(t.exit_price,4):"—"}</td>
-                      <td style={{padding:"6px 8px",color:t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted,fontWeight:700}}>{t.result||"OPEN"}</td>
-                      <td style={{padding:"6px 8px",color:(t.pnl||0)>=0?C.accent:C.red}}>{(t.pnl||0)>=0?"+":""}${fmt(t.pnl||0)}</td>
-                      <td style={{padding:"6px 8px"}}>${fmt(t.balance_after||0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ):(
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades yet</div>
-          )}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+            <StatCard label="DB Candles"   value={jobStatus.db_candles?.toLocaleString()||"—"}/>
+            <StatCard label="Expected"     value={jobStatus.expected?.toLocaleString()||"—"}/>
+            <StatCard label="Completeness" value={`${pct}%`} color={ready?C.accent:C.gold}/>
+          </div>
+          <div style={{background:C.dim,borderRadius:4,height:6}}>
+            <div style={{background:ready?C.accent:C.gold,height:6,borderRadius:4,width:`${Math.min(pct,100)}%`,transition:"width 0.5s"}}/>
+          </div>
+          {jobStatus.error && <div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {jobStatus.error}</div>}
         </div>
       )}
     </div>
   );
 }
-  const [account,  setAccount]  = useState(null);
-  const [trades,   setTrades]   = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState("");
+
+// ── JOURNAL TAB (Paper) ────────────────────────────────────────
+function JournalTab() {
+  const [account,      setAccount]      = useState(null);
+  const [trades,       setTrades]       = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState("");
   const [filterPair,   setFilterPair]   = useState("all");
   const [filterTF,     setFilterTF]     = useState("all");
   const [filterLabel,  setFilterLabel]  = useState("all");
   const [filterResult, setFilterResult] = useState("all");
-  const [tab,      setTab]      = useState("overview");
+  const [tab,          setTab]          = useState("overview");
 
-  const load = useCallback(async()=>{
+  const load = useCallback(async () => {
     setLoading(true); setError("");
-    try{
-      const res = await fetch(`${API}/journal`);
+    try {
+      const res  = await fetch(`${API}/journal`);
       const data = await res.json();
-      if(data.success){
+      if (data.success) {
         setAccount(data.account||null);
         setTrades(Array.isArray(data.trades)?data.trades:[]);
       } else throw new Error(data.error||"Failed");
-    }catch(e){ setError(e.message); }
+    } catch(e) { setError(e.message); }
     setLoading(false);
-  },[]);
+  }, []);
 
-  useEffect(()=>{ load(); },[]);
+  useEffect(() => { load(); }, []);
 
-  const pairs  = useMemo(()=>["all",...new Set(trades.map(t=>t.symbol))],[trades]);
-  const tfs    = useMemo(()=>["all",...new Set(trades.map(t=>t.timeframe))],[trades]);
-  const labels = useMemo(()=>["all",...new Set(trades.map(t=>t.label).filter(Boolean))],[trades]);
+  const pairs  = useMemo(() => ["all",...new Set(trades.map(t=>t.symbol))],  [trades]);
+  const tfs    = useMemo(() => ["all",...new Set(trades.map(t=>t.timeframe))],[trades]);
+  const labels = useMemo(() => ["all",...new Set(trades.map(t=>t.label).filter(Boolean))],[trades]);
 
-  const filtered = useMemo(()=>trades.filter(t=>{
-    if(filterPair!=="all"&&t.symbol!==filterPair) return false;
-    if(filterTF!=="all"&&t.timeframe!==filterTF) return false;
-    if(filterLabel!=="all"&&t.label!==filterLabel) return false;
-    if(filterResult==="win"&&!t.won) return false;
-    if(filterResult==="loss"&&t.won) return false;
+  const filtered = useMemo(() => trades.filter(t=>{
+    if (filterPair!=="all"   && t.symbol!==filterPair)      return false;
+    if (filterTF!=="all"     && t.timeframe!==filterTF)     return false;
+    if (filterLabel!=="all"  && t.label!==filterLabel)      return false;
+    if (filterResult==="win" && !t.won)                     return false;
+    if (filterResult==="loss"&& t.won)                      return false;
     return true;
-  }),[trades,filterPair,filterTF,filterLabel,filterResult]);
+  }), [trades,filterPair,filterTF,filterLabel,filterResult]);
 
-  const stats = useMemo(()=>{
-    if(!filtered.length) return null;
+  const stats = useMemo(() => {
+    if (!filtered.length) return null;
     const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
     const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
     const wr=wins.length/filtered.length*100;
@@ -1151,49 +996,46 @@ function LiveJournalTab(){
     const pf=avgLoss>0?avgWin/avgLoss:999;
     let maxCW=0,maxCL=0,cw=0,cl=0;
     [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
-    return{wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
-  },[filtered]);
+    return {wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
+  }, [filtered]);
 
-  const equityCurve = useMemo(()=>{
-    let eq=100;
+  const equityCurve = useMemo(() => {
+    let eq = 100;
     return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
-  },[filtered]);
+  }, [filtered]);
 
-  const pnlByPair = useMemo(()=>{
+  const pnlByPair = useMemo(() => {
     const map={};
     filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
     return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
-  },[filtered]);
+  }, [filtered]);
 
-  const fmtDate = (s)=>s?new Date(s).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
   const acc = account;
-  const totalReturn = acc?Math.round(((acc.balance-100)/100*100)*100)/100:0;
-  const green = totalReturn>=0;
-  const col = green?C.accent:C.red;
-  const sel2 = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
+  const totalReturn = acc ? Math.round(((acc.balance-100)/100*100)*100)/100 : 0;
+  const green = totalReturn >= 0;
+  const col   = green ? C.accent : C.red;
+  const sel2  = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
 
-  if(loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading journal...</div>;
-  if(error) return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
+  if (loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading journal...</div>;
+  if (error)   return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
 
   return (
     <div>
-      {/* Account Banner */}
-      {acc?(
+      {/* Account banner */}
+      {acc ? (
         <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>ACCOUNT BALANCE</div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>PAPER BALANCE</div>
             <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(acc.balance)}</div>
           </div>
           <div style={{flex:1,minWidth:180}}>
-            <div style={{fontSize:13,marginBottom:4}}>Total Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
-            <div style={{fontSize:11,color:C.muted}}>{acc.total_trades} trades · {acc.wins}W / {acc.losses}L · Max DD -{fmt(acc.max_drawdown)}%</div>
+            <div style={{fontSize:13,marginBottom:4}}>Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
+            <div style={{fontSize:11,color:C.muted}}>{acc.total_trades} trades · {acc.wins}W / {acc.losses}L · Max DD -{fmt(acc.max_drawdown||0)}%</div>
           </div>
           <button onClick={load} style={{background:C.card,color:C.accent,border:`1px solid ${C.accent}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
         </div>
-      ):(
-        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>
-          No paper trades yet — waiting for first signal 🤖
-        </div>
+      ) : (
+        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No paper trades yet — waiting for first signal 🤖</div>
       )}
 
       {/* Filters */}
@@ -1201,10 +1043,10 @@ function LiveJournalTab(){
         <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           {[
-            ["Pair", filterPair, setFilterPair, pairs, p=>p==="all"?"All Pairs":p],
-            ["Timeframe", filterTF, setFilterTF, tfs, t=>t==="all"?"All TF":t.toUpperCase()],
-            ["Strategy", filterLabel, setFilterLabel, labels, l=>l==="all"?"All":l],
-            ["Result", filterResult, setFilterResult, ["all","win","loss"], r=>r==="all"?"All Results":r==="win"?"Wins Only":"Losses Only"],
+            ["Pair",     filterPair,   setFilterPair,   pairs,  p=>p==="all"?"All Pairs":p],
+            ["TF",       filterTF,     setFilterTF,     tfs,    t=>t==="all"?"All TF":t.toUpperCase()],
+            ["Strategy", filterLabel,  setFilterLabel,  labels, l=>l==="all"?"All":l],
+            ["Result",   filterResult, setFilterResult, ["all","win","loss"], r=>r==="all"?"All":r==="win"?"Wins":"Losses"],
           ].map(([label,val,setVal,opts,fmtOpt])=>(
             <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
               <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
@@ -1228,35 +1070,33 @@ function LiveJournalTab(){
         ))}
       </div>
 
-      {/* Overview */}
-      {tab==="overview"&&(
+      {tab==="overview" && (
         <div>
-          {!stats?(
+          {!stats ? (
             <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ):(
+          ) : (
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-              <StatCard label="Total Trades"  value={stats.total}                           />
-              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}   color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
+              <StatCard label="Total Trades"  value={stats.total}/>
+              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}  color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
               <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
-              <StatCard label="Profit Factor" value={fmt(stats.pf)}          color={stats.pf>=1.5?C.accent:C.red}/>
-              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`} color={C.accent}/>
+              <StatCard label="Profit Factor" value={fmt(stats.pf)}        color={stats.pf>=1.5?C.accent:C.red}/>
+              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`}  color={C.accent}/>
               <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
-              <StatCard label="Max Consec W"  value={stats.maxCW}             color={C.accent}/>
-              <StatCard label="Max Consec L"  value={stats.maxCL}             color={C.red}/>
+              <StatCard label="Max Consec W"  value={stats.maxCW} color={C.accent}/>
+              <StatCard label="Max Consec L"  value={stats.maxCL} color={C.red}/>
             </div>
           )}
         </div>
       )}
 
-      {/* Equity Curve */}
-      {tab==="chart"&&(
+      {tab==="chart" && (
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
           <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Equity Curve · $100 Start</div>
-          {equityCurve.length>1?(
+          {equityCurve.length>1 ? (
             <ResponsiveContainer width="100%" height={220}>
               <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
                 <defs><linearGradient id="jgrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={C.accent} stopOpacity={0.3}/>
+                  <stop offset="5%"  stopColor={C.accent} stopOpacity={0.3}/>
                   <stop offset="95%" stopColor={C.accent} stopOpacity={0}/>
                 </linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
@@ -1267,16 +1107,15 @@ function LiveJournalTab(){
                 <Area type="monotone" dataKey="eq" stroke={C.accent} strokeWidth={2} fill="url(#jgrad)" dot={false}/>
               </AreaChart>
             </ResponsiveContainer>
-          ):(
+          ) : (
             <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
           )}
         </div>
       )}
 
-      {/* By Pair */}
-      {tab==="breakdown"&&(
+      {tab==="breakdown" && (
         <div>
-          {pnlByPair.length>0&&(
+          {pnlByPair.length>0 && (
             <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
               <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
               <ResponsiveContainer width="100%" height={180}>
@@ -1291,7 +1130,7 @@ function LiveJournalTab(){
               </ResponsiveContainer>
             </div>
           )}
-          {filtered.length>0&&(
+          {filtered.length>0 && (
             <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
               <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>Stats by Pair + Strategy</div>
               <div style={{overflowX:"auto"}}>
@@ -1306,22 +1145,24 @@ function LiveJournalTab(){
                       const groups={};
                       filtered.forEach(t=>{const k=`${t.symbol}|${t.timeframe}|${t.label||"-"}`;if(!groups[k])groups[k]=[];groups[k].push(t);});
                       return Object.entries(groups).map(([k,ts])=>{
-                        const[sym,tf,lbl]=k.split("|");
+                        const [sym,tf,lbl]=k.split("|");
                         const w=ts.filter(t=>t.won),l=ts.filter(t=>!t.won);
                         const pnl=ts.reduce((a,t)=>a+(t.pnl||0),0);
                         const aw=w.length?w.reduce((a,t)=>a+(t.pnl||0),0)/w.length:0;
                         const al=l.length?Math.abs(l.reduce((a,t)=>a+(t.pnl||0),0)/l.length):0;
                         const wr=w.length/ts.length*100;
-                        return(<tr key={k} style={{borderTop:`1px solid ${C.border}`}}>
-                          <td style={{padding:"6px 10px",fontWeight:700}}>{sym.replace("/USDT","")}</td>
-                          <td style={{padding:"6px 10px",color:C.muted}}>{tf.toUpperCase()}</td>
-                          <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{lbl}</td>
-                          <td style={{padding:"6px 10px"}}>{ts.length} ({w.length}W/{l.length}L)</td>
-                          <td style={{padding:"6px 10px",color:wr>=50?C.accent:C.red}}>{fmt(wr)}%</td>
-                          <td style={{padding:"6px 10px",color:pnl>=0?C.accent:C.red}}>{pnl>=0?"+":""}${fmt(pnl)}</td>
-                          <td style={{padding:"6px 10px",color:C.accent}}>${fmt(aw)}</td>
-                          <td style={{padding:"6px 10px",color:C.red}}>${fmt(al)}</td>
-                        </tr>);
+                        return (
+                          <tr key={k} style={{borderTop:`1px solid ${C.border}`}}>
+                            <td style={{padding:"6px 10px",fontWeight:700}}>{sym.replace("/USDT","")}</td>
+                            <td style={{padding:"6px 10px",color:C.muted}}>{tf.toUpperCase()}</td>
+                            <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{lbl}</td>
+                            <td style={{padding:"6px 10px"}}>{ts.length} ({w.length}W/{l.length}L)</td>
+                            <td style={{padding:"6px 10px",color:wr>=50?C.accent:C.red}}>{fmt(wr)}%</td>
+                            <td style={{padding:"6px 10px",color:pnl>=0?C.accent:C.red}}>{pnl>=0?"+":""}${fmt(pnl)}</td>
+                            <td style={{padding:"6px 10px",color:C.accent}}>${fmt(aw)}</td>
+                            <td style={{padding:"6px 10px",color:C.red}}>${fmt(al)}</td>
+                          </tr>
+                        );
                       });
                     })()}
                   </tbody>
@@ -1332,15 +1173,14 @@ function LiveJournalTab(){
         </div>
       )}
 
-      {/* Trade Log */}
-      {tab==="trades"&&(
+      {tab==="trades" && (
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
           <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
             Trade Log · {filtered.length} trades
           </div>
-          {filtered.length===0?(
+          {filtered.length===0 ? (
             <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ):(
+          ) : (
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
                 <thead><tr style={{background:C.bg}}>
@@ -1351,7 +1191,7 @@ function LiveJournalTab(){
                 <tbody>
                   {filtered.map((t,i)=>(
                     <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:t.won?"#00ff9d05":"#ff446605"}}>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDate(t.created_at)}</td>
+                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.created_at)}</td>
                       <td style={{padding:"6px 10px",fontWeight:700}}>{(t.symbol||"").replace("/USDT","")}</td>
                       <td style={{padding:"6px 10px",color:C.muted}}>{(t.timeframe||"").toUpperCase()}</td>
                       <td style={{padding:"6px 10px"}}>
@@ -1362,7 +1202,7 @@ function LiveJournalTab(){
                       <td style={{padding:"6px 10px",color:C.gold}}>{t.rr}R</td>
                       <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red,fontWeight:700}}>{t.pnl>=0?"+":""}${fmt(t.pnl)}</td>
                       <td style={{padding:"6px 10px"}}>${fmt(t.balance)}</td>
-                      <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{t.label||"-"}</td>
+                      <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{t.label||"—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1375,312 +1215,286 @@ function LiveJournalTab(){
   );
 }
 
-// ── MAIN APP ──────────────────────────────────────────────
-function PrefetchPanel() {
-  const [sym, setSym]       = useState("ETH/USDT");
-  const [tf, setTf]         = useState("1m");
-  const [status, setStatus] = useState("idle");
-  const [msg, setMsg]       = useState("");
-  const pairs = ["BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT","INJ/USDT"];
-  const tfs   = ["1m","5m","15m","1h","4h","1d"];
+// ── LIVE JOURNAL TAB ───────────────────────────────────────────
+function LiveJournalTab() {
+  const [account,      setAccount]      = useState(null);
+  const [trades,       setTrades]       = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState("");
+  const [filterPair,   setFilterPair]   = useState("all");
+  const [filterResult, setFilterResult] = useState("all");
+  const [tab,          setTab]          = useState("overview");
 
-  const prefetch = async () => {
-    setStatus("loading"); setMsg("Starting...");
-    // For 1m use last 30 days — a full year is 525k candles, too large
-    const isShort = tf === "1m" || tf === "5m";
-    const d = new Date(); d.setDate(d.getDate() - (isShort ? 30 : 365));
-    const start = d.toISOString().split("T")[0];
-    const end   = "now";
-    const label = isShort ? "Last 30 Days" : "2025 Full Year";
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
     try {
-      const res = await fetch(`${API}/prefetch`,{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({symbol:sym,timeframe:tf,start_date:start,end_date:end})
-      });
+      const res  = await fetch(`${API}/live-journal`);
       const data = await res.json();
-      setMsg(`${label} — ${data.message||"Queued"}`);
-      setStatus("queued");
-      let polls=0;
-      const poll = setInterval(async()=>{
-        polls++;
-        if(polls>120){clearInterval(poll);setStatus("timeout");setMsg("Timed out — check Railway logs");return;}
-        try{
-          const sr=await fetch(`${API}/prefetch-status?symbol=${encodeURIComponent(sym)}&timeframe=${tf}&start_date=${start}&end_date=${end}`);
-          const sd=await sr.json();
-          setMsg(`${sd.job_status} — ${(sd.db_candles||0).toLocaleString()} / ${(sd.expected||0).toLocaleString()} candles (${sd.completeness_pct||0}%)`);
-          if(sd.job_status==="done"){clearInterval(poll);setStatus("done");}
-          if(sd.job_status==="error"){clearInterval(poll);setStatus("error");setMsg(sd.error||"Error");}
-        }catch(e){}
-      },5000);
-    }catch(e){setStatus("error");setMsg(e.message);}
-  };
+      if (data.success) {
+        setAccount(data.account||null);
+        setTrades(Array.isArray(data.trades)?data.trades:[]);
+      } else throw new Error(data.error||"Failed");
+    } catch(e) { setError(e.message); }
+    setLoading(false);
+  }, []);
 
-  return (
-    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:16}}>
-      <div style={{fontSize:9,color:C.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10}}>📡 Prefetch Candle Data · 1M/5M = Last 30 Days · Others = 2025 Full Year</div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        <select value={sym} onChange={e=>setSym(e.target.value)} style={{background:C.surface,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",fontSize:11}}>
-          {pairs.map(p=><option key={p} value={p}>{p.replace("/USDT","")}</option>)}
-        </select>
-        <select value={tf} onChange={e=>setTf(e.target.value)} style={{background:C.surface,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",fontSize:11}}>
-          {tfs.map(t=><option key={t} value={t}>{t.toUpperCase()}</option>)}
-        </select>
-        <button onClick={prefetch} disabled={status==="loading"||status==="queued"} style={{
-          padding:"6px 16px",
-          background:status==="done"?C.accentDim:C.accent,
-          color:C.bg,border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontWeight:700
-        }}>{status==="loading"||status==="queued"?"⟳ Fetching...":status==="done"?"✅ Done":"⬇ Prefetch"}</button>
-        {msg&&<span style={{fontSize:10,color:status==="error"?C.red:status==="done"?C.accent:C.muted}}>{msg}</span>}
-      </div>
-    </div>
-  );
-}
+  useEffect(() => { load(); }, []);
 
-function PrefetchTab() {
-  const [jobs, setJobs]       = useState([]);  // [{sym, tf, start, end, label, status, msg, pct}]
-  const [sym, setSym]         = useState("SOL/USDT");
-  const [tf, setTf]           = useState("1m");
-  const [customStart, setCustomStart] = useState("2025-01-01");
-  const [customEnd, setCustomEnd]     = useState("now");
-  const [useCustom, setUseCustom]     = useState(false);
+  const pairs = useMemo(() => ["all",...new Set(trades.map(t=>t.symbol))], [trades]);
 
-  const PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT","INJ/USDT"];
-  const TFS   = ["1m","5m","15m","1h","4h","1d"];
+  const filtered = useMemo(() => trades.filter(t=>{
+    if (filterPair!=="all"   && t.symbol!==filterPair) return false;
+    if (filterResult==="win" && !t.won)                return false;
+    if (filterResult==="loss"&& t.won)                 return false;
+    return true;
+  }), [trades,filterPair,filterResult]);
 
-  const getDateRange = (timeframe) => {
-    if (useCustom) return { start: customStart, end: customEnd, label: `${customStart} → ${customEnd}` };
-    const isShort = timeframe === "1m" || timeframe === "5m";
-    const d = new Date(); d.setDate(d.getDate() - (isShort ? 30 : 365));
-    return {
-      start: d.toISOString().split("T")[0],
-      end:   "now",
-      label: isShort ? "Last 30 Days" : "Last 365 Days"
-    };
-  };
+  const stats = useMemo(() => {
+    if (!filtered.length) return null;
+    const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
+    const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
+    const wr=wins.length/filtered.length*100;
+    const avgWin=wins.length?wins.reduce((a,t)=>a+(t.pnl||0),0)/wins.length:0;
+    const avgLoss=losses.length?Math.abs(losses.reduce((a,t)=>a+(t.pnl||0),0)/losses.length):0;
+    const pf=avgLoss>0?avgWin/avgLoss:999;
+    let maxCW=0,maxCL=0,cw=0,cl=0;
+    [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
+    return {wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
+  }, [filtered]);
 
-  const startPrefetch = async (pSym, pTf) => {
-    const { start, end, label } = getDateRange(pTf);
-    const key = `${pSym}_${pTf}`;
+  const equityCurve = useMemo(() => {
+    if (!account) return [];
+    let eq = account.start_balance || 100;
+    return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
+  }, [filtered,account]);
 
-    // Add or update job
-    setJobs(prev => {
-      const existing = prev.find(j => j.key === key);
-      if (existing) return prev.map(j => j.key === key ? {...j, status:"loading", msg:"Starting...", pct:0} : j);
-      return [...prev, { key, sym: pSym, tf: pTf, start, end, label, status:"loading", msg:"Starting...", pct:0 }];
-    });
+  const pnlByPair = useMemo(() => {
+    const map={};
+    filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
+    return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
+  }, [filtered]);
 
-    try {
-      await fetch(`${API}/prefetch`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: pSym, timeframe: pTf, start_date: start, end_date: end })
-      });
+  const startBal    = account?.start_balance || 100;
+  const totalReturn = account ? Math.round(((account.balance-startBal)/startBal*100)*100)/100 : 0;
+  const green = totalReturn >= 0;
+  const col   = green ? C.accent : C.red;
+  const sel2  = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
 
-      // Poll status
-      let polls = 0;
-      const poll = setInterval(async () => {
-        polls++;
-        if (polls > 180) {
-          clearInterval(poll);
-          setJobs(prev => prev.map(j => j.key===key ? {...j, status:"timeout", msg:"Timed out"} : j));
-          return;
-        }
-        try {
-          const sr = await fetch(`${API}/prefetch-status?symbol=${encodeURIComponent(pSym)}&timeframe=${pTf}&start_date=${start}&end_date=${end}`);
-          const sd = await sr.json();
-          const pct = sd.completeness_pct || 0;
-          const msg = `${(sd.db_candles||0).toLocaleString()} / ${(sd.expected||0).toLocaleString()} candles (${pct}%)`;
-          const done = sd.job_status === "done" || pct >= 75;
-          const err  = sd.job_status === "error";
-          if (done || err) clearInterval(poll);
-          setJobs(prev => prev.map(j => j.key===key ? {
-            ...j,
-            status: err ? "error" : done ? "done" : "loading",
-            msg, pct,
-            db_candles: sd.db_candles,
-            expected: sd.expected
-          } : j));
-        } catch(e) {}
-      }, 5000);
-    } catch(e) {
-      setJobs(prev => prev.map(j => j.key===key ? {...j, status:"error", msg:e.message} : j));
-    }
-  };
-
-  const clearDone = () => setJobs(prev => prev.filter(j => j.status !== "done"));
-
-  // Batch: prefetch all pairs for selected TF
-  const batchAll = () => PAIRS.forEach(p => startPrefetch(p, tf));
-
-  const statusColor = (s) => s==="done"?C.accent : s==="error"?C.red : s==="timeout"?C.gold : C.muted;
-  const statusIcon  = (s) => s==="done"?"✅" : s==="error"?"✗" : s==="timeout"?"⏱" : "⟳";
+  if (loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading live journal...</div>;
+  if (error)   return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
 
   return (
     <div>
-      {/* Controls */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:12}}>
-          📡 Prefetch Candle Data
-        </div>
+      {/* Live badge */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <div style={{width:8,height:8,borderRadius:"50%",background:C.red,boxShadow:`0 0 8px ${C.red}`}}/>
+        <span style={{fontSize:10,color:C.red,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700}}>Live Trading Account</span>
+      </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-          <Sel label="Pair"      value={sym} onChange={setSym} options={PAIRS.map(p=>({value:p,label:p}))}/>
-          <Sel label="Timeframe" value={tf}  onChange={setTf}  options={TFS.map(t=>({value:t,label:t.toUpperCase()}))}/>
-        </div>
-
-        {/* Date range toggle */}
-        <div style={{marginBottom:12}}>
-          <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>DATE RANGE</div>
-          <div style={{display:"flex",gap:8,marginBottom:8}}>
-            {[false,true].map(v=>(
-              <div key={String(v)} onClick={()=>setUseCustom(v)} style={{
-                background:useCustom===v?C.accentDim:C.card,
-                border:`1px solid ${useCustom===v?C.accent:C.border}`,
-                borderRadius:6,padding:"6px 14px",cursor:"pointer",fontSize:11,
-                color:useCustom===v?C.accent:C.text
-              }}>{v?"Custom":"Auto"}</div>
-            ))}
+      {/* Account banner */}
+      {account ? (
+        <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>LIVE BALANCE</div>
+            <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(account.balance)}</div>
           </div>
-          {useCustom ? (
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <div>
-                <div style={{fontSize:9,color:C.muted,marginBottom:4}}>START</div>
-                <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)}
-                  style={{background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,width:"100%"}}/>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:C.muted,marginBottom:4}}>END (leave blank = now)</div>
-                <input type="date" value={customEnd==="now"?"":customEnd}
-                  onChange={e=>setCustomEnd(e.target.value||"now")}
-                  style={{background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,width:"100%"}}/>
-              </div>
-            </div>
-          ) : (
-            <div style={{fontSize:10,color:C.muted}}>
-              1m/5m → Last 30 days &nbsp;·&nbsp; 15m and above → Last 365 days
-            </div>
-          )}
+          <div style={{flex:1,minWidth:180}}>
+            <div style={{fontSize:13,marginBottom:4}}>Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
+            <div style={{fontSize:11,color:C.muted}}>{account.total_trades||0} trades · {account.wins||0}W / {account.losses||0}L · Max DD -{fmt(account.max_drawdown||0)}%</div>
+            <div style={{fontSize:10,color:C.muted,marginTop:2}}>Started: ${fmt(startBal)}</div>
+          </div>
+          <button onClick={load} style={{background:C.card,color:C.red,border:`1px solid ${C.red}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
         </div>
+      ) : (
+        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No live trades yet — bot not started 🤖</div>
+      )}
 
-        {/* Buttons */}
+      {/* Filters */}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:16}}>
+        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <button onClick={()=>startPrefetch(sym,tf)} style={{
-            background:C.accent,color:C.bg,border:"none",borderRadius:8,
-            padding:"11px 0",fontSize:12,fontWeight:800,cursor:"pointer"
-          }}>⬇ Prefetch {sym.replace("/USDT","")} {tf.toUpperCase()}</button>
-          <button onClick={batchAll} style={{
-            background:C.goldDim,color:C.gold,border:`1px solid ${C.gold}`,borderRadius:8,
-            padding:"11px 0",fontSize:12,fontWeight:800,cursor:"pointer"
-          }}>⬇ All Pairs · {tf.toUpperCase()}</button>
+          {[
+            ["Pair",   filterPair,   setFilterPair,   pairs,              p=>p==="all"?"All Pairs":p],
+            ["Result", filterResult, setFilterResult, ["all","win","loss"],r=>r==="all"?"All":r==="win"?"Wins":"Losses"],
+          ].map(([label,val,setVal,opts,fmtOpt])=>(
+            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
+              <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
+              <select value={val} onChange={e=>setVal(e.target.value)} style={sel2}>
+                {opts.map(o=><option key={o} value={o}>{fmtOpt(o)}</option>)}
+              </select>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Job list */}
-      {jobs.length > 0 && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 16px",borderBottom:`1px solid ${C.border}`}}>
-            <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-              Jobs · {jobs.length} total · {jobs.filter(j=>j.status==="done").length} done
-            </span>
-            <button onClick={clearDone} style={{
-              background:"transparent",color:C.muted,border:`1px solid ${C.border}`,
-              borderRadius:4,padding:"3px 10px",fontSize:9,cursor:"pointer"
-            }}>Clear Done</button>
-          </div>
-          <div>
-            {[...jobs].reverse().map(j=>(
-              <div key={j.key} style={{
-                padding:"12px 16px",borderBottom:`1px solid ${C.border}`,
-                background:j.status==="done"?C.accentDim:j.status==="error"?C.redDim:"transparent"
-              }}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                    <span style={{fontSize:13,fontWeight:800}}>{j.sym.replace("/USDT","")}</span>
-                    <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 7px",fontSize:10,color:C.gold}}>{j.tf.toUpperCase()}</span>
-                    <span style={{fontSize:10,color:C.muted}}>{j.label}</span>
-                  </div>
-                  <span style={{fontSize:11,color:statusColor(j.status),fontWeight:700}}>
-                    {statusIcon(j.status)} {j.status.toUpperCase()}
-                  </span>
-                </div>
-                {/* Progress bar */}
-                <div style={{background:C.dim,borderRadius:3,height:4,marginBottom:4}}>
-                  <div style={{
-                    background:j.status==="done"?C.accent:j.status==="error"?C.red:C.gold,
-                    borderRadius:3,height:4,
-                    width:`${Math.min(j.pct||0,100)}%`,
-                    transition:"width 0.5s ease"
-                  }}/>
-                </div>
-                <div style={{fontSize:10,color:C.muted}}>{j.msg}</div>
-              </div>
-            ))}
-          </div>
+      {/* Sub tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:16,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {[["overview","Overview"],["chart","Equity"],["breakdown","By Pair"],["trades","Trade Log"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{
+            flex:1,padding:"10px 4px",background:tab===id?C.card:"transparent",
+            color:tab===id?C.red:C.muted,border:"none",
+            borderBottom:tab===id?`2px solid ${C.red}`:"2px solid transparent",
+            fontSize:9,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {tab==="overview" && (
+        <div>
+          {!stats ? (
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
+              <StatCard label="Total Trades"  value={stats.total}/>
+              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}  color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
+              <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
+              <StatCard label="Profit Factor" value={fmt(stats.pf)}        color={stats.pf>=1.5?C.accent:C.red}/>
+              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`}  color={C.accent}/>
+              <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
+              <StatCard label="Max Consec W"  value={stats.maxCW} color={C.accent}/>
+              <StatCard label="Max Consec L"  value={stats.maxCL} color={C.red}/>
+            </div>
+          )}
         </div>
       )}
 
-      {jobs.length === 0 && (
-        <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>
-          Select pair + timeframe and hit <span style={{color:C.accent}}>⬇ Prefetch</span>
+      {tab==="chart" && (
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Live Equity Curve</div>
+          {equityCurve.length>1 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
+                <defs><linearGradient id="lgrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={col} stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor={col} stopOpacity={0}/>
+                </linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                <XAxis dataKey="t" tickFormatter={t=>new Date(t).toLocaleDateString("en-MY",{month:"short",day:"numeric"})} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={48}/>
+                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                <ReferenceLine y={startBal} stroke={C.muted} strokeDasharray="4 4"/>
+                <Area type="monotone" dataKey="eq" stroke={col} strokeWidth={2} fill="url(#lgrad)" dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
+          )}
+        </div>
+      )}
+
+      {tab==="breakdown" && (
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
+          {pnlByPair.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={pnlByPair} margin={{top:4,right:4,left:0,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                <XAxis dataKey="name" tick={{fill:C.muted,fontSize:10}} tickLine={false} axisLine={false}/>
+                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
+                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
+                <ReferenceLine y={0} stroke={C.muted}/>
+                <Bar dataKey="value" radius={[3,3,0,0]} fill={C.red}/>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No data yet</div>
+          )}
+        </div>
+      )}
+
+      {tab==="trades" && (
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
+          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
+            Live Trade Log · {filtered.length} trades
+          </div>
+          {filtered.length ? (
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr style={{background:C.bg}}>
+                  {["#","Pair","Dir","Date","Entry","SL","TP","Exit","Result","P&L","Balance"].map(h=>(
+                    <th key={h} style={{padding:"7px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {filtered.map((t,i)=>(
+                    <tr key={i} style={{borderTop:`1px solid ${C.border}`}}>
+                      <td style={{padding:"6px 8px",color:C.muted}}>{t.id}</td>
+                      <td style={{padding:"6px 8px"}}>{(t.symbol||"").replace("/USDT","")}</td>
+                      <td style={{padding:"6px 8px"}}>
+                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 5px",borderRadius:3,fontSize:8,fontWeight:700}}>{t.direction}</span>
+                      </td>
+                      <td style={{padding:"6px 8px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.created_at)}</td>
+                      <td style={{padding:"6px 8px"}}>{fmt(t.entry_price,4)}</td>
+                      <td style={{padding:"6px 8px",color:C.red}}>{fmt(t.sl_price,4)}</td>
+                      <td style={{padding:"6px 8px",color:C.accent}}>{fmt(t.tp_price,4)}</td>
+                      <td style={{padding:"6px 8px"}}>{t.exit_price?fmt(t.exit_price,4):"—"}</td>
+                      <td style={{padding:"6px 8px",color:t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted,fontWeight:700}}>{t.result||"OPEN"}</td>
+                      <td style={{padding:"6px 8px",color:(t.pnl||0)>=0?C.accent:C.red}}>{(t.pnl||0)>=0?"+":""}${fmt(t.pnl||0)}</td>
+                      <td style={{padding:"6px 8px"}}>${fmt(t.balance_after||0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades yet</div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function App(){
-  const [mainTab,setMainTab]=useState("single");
-  const tabs=[
-    ["single","Single"],
-    ["matrix","Matrix"],
-    ["compare","Compare"],
-    ["prefetch","Prefetch"],
-    ["journal","Paper"],
-    ["live","Live"],
+// ── APP ────────────────────────────────────────────────────────
+function App() {
+  const [mainTab, setMainTab] = useState("single");
+  const tabs = [
+    ["single",   "Single"],
+    ["matrix",   "Matrix"],
+    ["compare",  "Compare"],
+    ["prefetch", "Prefetch"],
+    ["journal",  "Paper"],
+    ["live",     "Live"],
   ];
+
+  const tabColor = (id) => {
+    if (id==="compare"||id==="prefetch") return C.gold;
+    if (id==="live") return C.red;
+    if (id==="journal") return C.blue;
+    return C.accent;
+  };
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,padding:"20px 16px",maxWidth:900,margin:"0 auto"}}>
       <div style={{marginBottom:20}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Fib Structure Engine v2</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v7</span>
         </div>
         <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>1M · 5M · 15M · 1H · 4H · 1D · Variable RR · Multi-period compare</p>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>Live-realistic · Pivot lag · Next-open fill · 1M · 5M · 15M · 1H · 4H · 1D</p>
       </div>
 
       <div style={{display:"flex",gap:0,marginBottom:20,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
         {tabs.map(([id,label])=>(
           <button key={id} onClick={()=>setMainTab(id)} style={{
-            flex:1,padding:"12px 8px",
+            flex:1, padding:"12px 8px",
             background:mainTab===id?C.card:"transparent",
-            color:mainTab===id?(
-              id==="compare"?C.gold:
-              id==="journal"?C.blue:
-              id==="prefetch"?C.gold:
-              id==="live"?C.red:
-              C.accent
-            ):C.muted,
+            color:mainTab===id?tabColor(id):C.muted,
             border:"none",
-            borderBottom:mainTab===id?`2px solid ${
-              id==="compare"?C.gold:
-              id==="journal"?C.blue:
-              id==="prefetch"?C.gold:
-              id==="live"?C.red:
-              C.accent
-            }`:"2px solid transparent",
-            fontSize:11,fontWeight:mainTab===id?700:400,
-            cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
+            borderBottom:mainTab===id?`2px solid ${tabColor(id)}`:"2px solid transparent",
+            fontSize:11, fontWeight:mainTab===id?700:400,
+            cursor:"pointer", letterSpacing:"0.08em", textTransform:"uppercase"
           }}>{label}</button>
         ))}
       </div>
 
-      {mainTab==="single"&&<SingleTab/>}
-      {mainTab==="matrix"&&<MatrixTab/>}
-      {mainTab==="compare"&&<CompareTab/>}
-      {mainTab==="prefetch"&&<PrefetchTab/>}
-      {mainTab==="journal"&&<JournalTab/>}
-      {mainTab==="live"&&<LiveJournalTab/>}
+      {mainTab==="single"   && <SingleTab/>}
+      {mainTab==="matrix"   && <MatrixTab/>}
+      {mainTab==="compare"  && <CompareTab/>}
+      {mainTab==="prefetch" && <PrefetchTab/>}
+      {mainTab==="journal"  && <JournalTab/>}
+      {mainTab==="live"     && <LiveJournalTab/>}
     </div>
   );
 }
