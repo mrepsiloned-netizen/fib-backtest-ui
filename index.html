@@ -447,7 +447,8 @@ function SingleTab() {
             <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>RISK: {result.risk_pct}%</span>
             <span style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R · FIB: {fibLevel}</span>
             <span style={{background:C.blueDim,border:`1px solid ${C.blue}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.blue}}>ENTRY: {entryMode.toUpperCase()} · N={pivotN}</span>
-            {useEma && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>EMA {emaFast}/{emaSlow} FILTER ON</span>}
+            {emaPair!=="off" && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>EMA {emaPair}</span>}
+            {adxMin>0 && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>ADX≥{adxMin}</span>}
           </div>
 
           {/* Hero return */}
