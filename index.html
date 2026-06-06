@@ -219,6 +219,9 @@ function SingleTab() {
   const [entryMode, setEntryMode] = useState("touch");
   const [engine,    setEngine]    = useState("original");
   const [showAdv,   setShowAdv]   = useState(false);
+  const [useEma,    setUseEma]    = useState(false);
+  const [emaFast,   setEmaFast]   = useState(34);
+  const [emaSlow,   setEmaSlow]   = useState(55);
   const [status,    setStatus]    = useState("idle");
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
@@ -252,7 +255,8 @@ function SingleTab() {
           symbol, timeframe:tf, start_date:start, end_date:end,
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
-          entry_mode:entryMode, engine
+          entry_mode:entryMode, engine,
+          use_ema_filter:useEma, ema_fast:emaFast, ema_slow:emaSlow
         })
       });
       setPhase("Processing results...");
@@ -266,7 +270,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -302,6 +306,54 @@ function SingleTab() {
 
         <EngineChips value={engine} onChange={setEngine}/>
         <EntryChips  value={entryMode} onChange={setEntryMode}/>
+
+        {/* EMA Filter */}
+        <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>EMA Trend Filter</span>
+          <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
+              <div onClick={()=>setUseEma(!useEma)} style={{
+                background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
+                borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
+              }}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
+                <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
+                  {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
+                </span>
+              </div>
+            </div>
+            {useEma && (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {[13,21,34].map(v=>(
+                      <div key={v} onClick={()=>setEmaFast(v)} style={{
+                        background:emaFast===v?C.accentDim:C.card,
+                        border:`1px solid ${emaFast===v?C.accent:C.border}`,
+                        borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                        fontSize:11,color:emaFast===v?C.accent:C.text
+                      }}>{v}</div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {[21,34,55].map(v=>(
+                      <div key={v} onClick={()=>setEmaSlow(v)} style={{
+                        background:emaSlow===v?C.accentDim:C.card,
+                        border:`1px solid ${emaSlow===v?C.accent:C.border}`,
+                        borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                        fontSize:11,color:emaSlow===v?C.accent:C.text
+                      }}>{v}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Advanced */}
         <div onClick={()=>setShowAdv(!showAdv)} style={{
@@ -392,6 +444,7 @@ function SingleTab() {
             <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>RISK: {result.risk_pct}%</span>
             <span style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R · FIB: {fibLevel}</span>
             <span style={{background:C.blueDim,border:`1px solid ${C.blue}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.blue}}>ENTRY: {entryMode.toUpperCase()} · N={pivotN}</span>
+            {useEma && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>EMA {emaFast}/{emaSlow} FILTER ON</span>}
           </div>
 
           {/* Hero return */}
@@ -539,6 +592,9 @@ function MatrixTab() {
   const [selEngines,    setSelEngines]    = useState(["original"]);
   const [selEntryModes, setSelEntryModes] = useState(["touch"]);
   const [period,        setPeriod]        = useState(3);
+  const [useEma,        setUseEma]        = useState(false);
+  const [emaFast,       setEmaFast]       = useState(34);
+  const [emaSlow,       setEmaSlow]       = useState(55);
   const [status,        setStatus]        = useState("idle");
   const [results,       setResults]       = useState([]);
   const [progress,      setProgress]      = useState(0);
@@ -559,7 +615,8 @@ function MatrixTab() {
       for(const pn of selPivots) for(const rr of selRR) for(const fib of selFibs)
         for(const eng of selEngines) for(const em of selEntryModes)
           configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,
-            pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,engine:eng,entry_mode:em});
+            pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,engine:eng,entry_mode:em,
+            use_ema_filter:useEma,ema_fast:emaFast,ema_slow:emaSlow});
     setTotal(configs.length);
     const allResults = [];
     for(let i=0; i<configs.length; i+=8) {
@@ -571,7 +628,7 @@ function MatrixTab() {
       } catch(e) { setError(e.message); }
     }
     setStatus("done");
-  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos]);
+  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos,useEma,emaFast,emaSlow]);
 
   const sorted = useMemo(() => {
     const ok = results.filter(r=>r.success&&r.stats);
@@ -623,6 +680,53 @@ function MatrixTab() {
         <div style={{marginBottom:14}}>
           <Sel label="Period" value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
         </div>
+
+        {/* EMA Filter */}
+        <div style={{marginBottom:14,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>EMA Trend Filter</span>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
+            <div onClick={()=>setUseEma(!useEma)} style={{
+              background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
+              borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
+            }}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
+              <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
+                {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
+              </span>
+            </div>
+          </div>
+          {useEma && (
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {[13,21,34].map(v=>(
+                    <div key={v} onClick={()=>setEmaFast(v)} style={{
+                      background:emaFast===v?C.accentDim:C.card,
+                      border:`1px solid ${emaFast===v?C.accent:C.border}`,
+                      borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                      fontSize:11,color:emaFast===v?C.accent:C.text
+                    }}>{v}</div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {[21,34,55].map(v=>(
+                    <div key={v} onClick={()=>setEmaSlow(v)} style={{
+                      background:emaSlow===v?C.accentDim:C.card,
+                      border:`1px solid ${emaSlow===v?C.accent:C.border}`,
+                      borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                      fontSize:11,color:emaSlow===v?C.accent:C.text
+                    }}>{v}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
           background:status==="loading"||!totalCombos?C.dim:C.accent,color:C.bg,border:"none",
           borderRadius:8,padding:"12px 20px",fontSize:13,fontWeight:800,
