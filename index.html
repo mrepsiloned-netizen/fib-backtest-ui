@@ -703,10 +703,12 @@ function MatrixTab() {
   );
 
   const exportCSV = () => {
-    const headers=["Pair","TF","Risk","N","RR","Fib","Engine","EntryMode","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","KellyFull"];
+    const headers=["Pair","TF","Risk","N","RR","Fib","Engine","EntryMode","EMA_Filter","EMA_Fast","EMA_Slow","ADX_Period","ADX_Min","Return%","CAGR%","MaxDD%","Sharpe","PF","WR%","Trades","AvgWin","AvgLoss","KellyFull"];
     const rows=sorted.map(r=>{const s=r.stats;return[
       r.symbol.replace("/USDT",""),r.timeframe,r.risk_method,r.pivot_n,r.rr,r.fib_level||0.618,
       r.engine||"—",r.entry_mode||"—",
+      r.use_ema_filter?"Y":"N", r.ema_fast||"—", r.ema_slow||"—",
+      r.adx_period||"—", r.adx_threshold||0,
       s.total_return,s.cagr,s.max_drawdown,s.sharpe,s.profit_factor,s.win_rate,s.total_trades,
       s.avg_win,s.avg_loss,s.kelly_full
     ].join(",");});
@@ -724,7 +726,7 @@ function MatrixTab() {
           ["Pivot N",     ALL_PIVOTS,   selPivots,     setSelPivots,     n=>`N=${n}`],
           ["Risk:Reward", ALL_RR,       selRR,         setSelRR,         r=>`${r}R`],
           ["Fib Level",   ALL_FIBS,     selFibs,       setSelFibs,       f=>`${f}`],
-          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>e],
+          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>({original:"Original",bos_pivot:"BOS Pivot",structure:"2-Pivot Pullback",pullback:"BOS Pullback",ema_cross:"EMA Cross"}[e]||e)],
           ["Entry Mode",  ALL_ENTRY,    selEntryModes, setSelEntryModes, e=>e],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
@@ -844,6 +846,9 @@ function MatrixTab() {
                 <th style={{padding:"8px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>RR</th>
                 <th style={{padding:"8px 10px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Engine</th>
                 <th style={{padding:"8px 10px",color:C.accent,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>Entry</th>
+                <th style={{padding:"8px 10px",color:C.gold,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>EMA</th>
+                <th style={{padding:"8px 10px",color:C.gold,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>F/S</th>
+                <th style={{padding:"8px 10px",color:C.gold,textAlign:"left",fontWeight:400,whiteSpace:"nowrap",fontSize:9}}>ADX</th>
                 <SortTh k="total_return"  label="Return %"/>
                 <SortTh k="cagr"          label="CAGR %"/>
                 <SortTh k="max_drawdown"  label="Max DD %"/>
@@ -866,6 +871,15 @@ function MatrixTab() {
                       </td>
                       <td style={{padding:"6px 10px"}}>
                         <span style={{background:C.blueDim,color:C.blue,padding:"2px 6px",borderRadius:3,fontSize:8,fontWeight:700}}>{r.entry_mode||"—"}</span>
+                      </td>
+                      <td style={{padding:"6px 10px",fontSize:8,color:r.use_ema_filter?C.accent:C.muted}}>
+                        {r.use_ema_filter?"ON":"—"}
+                      </td>
+                      <td style={{padding:"6px 10px",fontSize:8,color:C.gold}}>
+                        {r.use_ema_filter||r.engine==="ema_cross"?`${r.ema_fast}/${r.ema_slow}`:"—"}
+                      </td>
+                      <td style={{padding:"6px 10px",fontSize:8,color:r.adx_threshold>0?C.gold:C.muted}}>
+                        {r.adx_threshold>0?`${r.adx_period}@${r.adx_threshold}`:"—"}
                       </td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:g?C.accent:C.red,fontWeight:700}}>{g?"+":""}{fmt(s.total_return)}%</td>
                       <td style={{padding:"6px 10px",textAlign:"right",color:C.gold}}>{fmt(s.cagr)}%</td>
@@ -998,7 +1012,7 @@ function CompareTab() {
           ["Pivot N",     ALL_PIVOTS,   selPivots,     setSelPivots,     n=>`N=${n}`],
           ["Risk:Reward", ALL_RR,       selRR,         setSelRR,         r=>`${r}R`],
           ["Fib Level",   ALL_FIBS,     selFibs,       setSelFibs,       f=>`${f}`],
-          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>e],
+          ["Engine",      ALL_ENGINES,  selEngines,    setSelEngines,    e=>({original:"Original",bos_pivot:"BOS Pivot",structure:"2-Pivot Pullback",pullback:"BOS Pullback",ema_cross:"EMA Cross"}[e]||e)],
           ["Entry Mode",  ALL_ENTRY,    selEntryModes, setSelEntryModes, e=>e],
         ].map(([label,all,sel,setSel,fmt])=>(
           <div key={label} style={{marginBottom:14}}>
