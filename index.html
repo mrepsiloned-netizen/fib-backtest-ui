@@ -44,7 +44,7 @@ const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
-const ALL_ENGINES    = ["original","classic","classic_v2","structure"];
+const ALL_ENGINES    = ["original","classic","classic_v2","structure","pullback","breakout"];
 const ALL_ENTRY      = ["touch","rejection","reclaim"];
 
 const PERIODS = [
@@ -166,7 +166,9 @@ function EngineChips({value,onChange}) {
     {value:"original",   label:"Original",   desc:"LH→LL→LH triplet"},
     {value:"classic",    label:"Classic",    desc:"P1→P3 fixed fib"},
     {value:"classic_v2", label:"Classic V2", desc:"+ re-base + stale"},
-    {value:"structure",  label:"Structure",  desc:"Floating P3 state"},
+    {value:"structure",  label:"Structure",  desc:"BOS state machine"},
+    {value:"pullback",   label:"Pullback ★", desc:"P1 break→fib entry"},
+    {value:"breakout",   label:"Breakout ★", desc:"Hist high break+ATR SL"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -230,6 +232,7 @@ function SingleTab() {
   const [useEma,    setUseEma]    = useState(false);
   const [emaFast,   setEmaFast]   = useState(34);
   const [emaSlow,   setEmaSlow]   = useState(55);
+  const [atrMult,   setAtrMult]   = useState(1.5);
   const [status,    setStatus]    = useState("idle");
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
@@ -264,7 +267,8 @@ function SingleTab() {
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
           entry_mode:entryMode, engine,
-          use_ema_filter:useEma, ema_fast:emaFast, ema_slow:emaSlow
+          use_ema_filter:useEma, ema_fast:emaFast, ema_slow:emaSlow,
+          atr_mult:atrMult
         })
       });
       setPhase("Processing results...");
@@ -278,7 +282,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow,atrMult]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -362,6 +366,24 @@ function SingleTab() {
             )}
           </div>
         </div>
+
+        {/* ATR Multiplier — only for breakout engine */}
+        {engine==="breakout" && (
+          <div style={{marginBottom:14,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>ATR Multiplier (Breakout SL)</span>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {[1.0,1.5,2.0,2.5,3.0].map(v=>(
+                <div key={v} onClick={()=>setAtrMult(v)} style={{
+                  background:atrMult===v?C.accentDim:C.card,
+                  border:`1px solid ${atrMult===v?C.accent:C.border}`,
+                  borderRadius:6,padding:"7px 14px",cursor:"pointer",
+                  fontSize:12,color:atrMult===v?C.accent:C.text,
+                  fontWeight:atrMult===v?700:400
+                }}>{v}x</div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Advanced */}
         <div onClick={()=>setShowAdv(!showAdv)} style={{
