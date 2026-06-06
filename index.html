@@ -44,7 +44,7 @@ const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
-const ALL_ENGINES    = ["original","classic","classic_v2","structure","pullback","breakout"];
+const ALL_ENGINES    = ["original","bos_pivot","structure","pullback","ema_cross"];
 const ALL_ENTRY      = ["touch","rejection","reclaim"];
 
 const PERIODS = [
@@ -163,12 +163,11 @@ function ChipRow({label,options,selected,onSelect,color}) {
 
 function EngineChips({value,onChange}) {
   const engines = [
-    {value:"original",   label:"Original",   desc:"LH→LL→LH triplet"},
-    {value:"classic",    label:"Classic",    desc:"P1→P3 fixed fib"},
-    {value:"classic_v2", label:"Classic V2", desc:"+ re-base + stale"},
-    {value:"structure",  label:"Structure",  desc:"BOS state machine"},
-    {value:"pullback",   label:"Pullback ★", desc:"P1 break→fib entry"},
-    {value:"breakout",   label:"Breakout ★", desc:"Hist high break+ATR SL"},
+    {value:"original",  label:"Original",       desc:"LH→LL→LH triplet"},
+    {value:"bos_pivot", label:"BOS Pivot",       desc:"P1→P3 fixed fib"},
+    {value:"structure", label:"2-Pivot Pullback",desc:"2 pivot highs→fib"},
+    {value:"pullback",  label:"BOS Pullback",    desc:"BOS→keeps rebasing"},
+    {value:"ema_cross", label:"EMA Cross",       desc:"144/169 pullback+ADX"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -227,12 +226,13 @@ function SingleTab() {
   const [stopBuf,   setStopBuf]   = useState(0.001);
   const [kStale,    setKStale]    = useState(0);
   const [entryMode, setEntryMode] = useState("touch");
-  const [engine,    setEngine]    = useState("original");
+  const [engine,    setEngine]    = useState("pullback");
   const [showAdv,   setShowAdv]   = useState(false);
   const [useEma,    setUseEma]    = useState(false);
   const [emaFast,   setEmaFast]   = useState(34);
   const [emaSlow,   setEmaSlow]   = useState(55);
-  const [atrMult,   setAtrMult]   = useState(1.5);
+  const [adxPeriod, setAdxPeriod] = useState(14);
+  const [adxThresh, setAdxThresh] = useState(25);
   const [status,    setStatus]    = useState("idle");
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
@@ -268,7 +268,7 @@ function SingleTab() {
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
           entry_mode:entryMode, engine,
           use_ema_filter:useEma, ema_fast:emaFast, ema_slow:emaSlow,
-          atr_mult:atrMult
+          adx_period:adxPeriod, adx_threshold:adxThresh
         })
       });
       setPhase("Processing results...");
@@ -282,7 +282,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow,atrMult]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow,adxPeriod,adxThresh]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -321,69 +321,92 @@ function SingleTab() {
 
         {/* EMA Filter */}
         <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>EMA Trend Filter</span>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
+            {engine==="ema_cross" ? "EMA Cross Settings" : "EMA Trend Filter"}
+          </span>
           <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
-              <div onClick={()=>setUseEma(!useEma)} style={{
-                background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
-                borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
-              }}>
-                <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
-                <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
-                  {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
-                </span>
+            {/* Toggle — hidden for ema_cross since it's always active */}
+            {engine!=="ema_cross" && (
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
+                <div onClick={()=>setUseEma(!useEma)} style={{
+                  background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
+                  borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
+                }}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
+                  <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
+                    {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
+                  </span>
+                </div>
               </div>
-            </div>
-            {useEma && (
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {[13,21,34].map(v=>(
-                      <div key={v} onClick={()=>setEmaFast(v)} style={{
-                        background:emaFast===v?C.accentDim:C.card,
-                        border:`1px solid ${emaFast===v?C.accent:C.border}`,
-                        borderRadius:4,padding:"5px 10px",cursor:"pointer",
-                        fontSize:11,color:emaFast===v?C.accent:C.text
-                      }}>{v}</div>
-                    ))}
+            )}
+            {/* EMA pickers — show when filter is ON or ema_cross selected */}
+            {(useEma || engine==="ema_cross") && (
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:engine==="ema_cross"?12:0}}>
+                  <div>
+                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {[13,21,34,55,89,144].map(v=>(
+                        <div key={v} onClick={()=>setEmaFast(v)} style={{
+                          background:emaFast===v?C.accentDim:C.card,
+                          border:`1px solid ${emaFast===v?C.accent:C.border}`,
+                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
+                          fontSize:10,color:emaFast===v?C.accent:C.text
+                        }}>{v}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {[21,34,55,89,169,200].map(v=>(
+                        <div key={v} onClick={()=>setEmaSlow(v)} style={{
+                          background:emaSlow===v?C.accentDim:C.card,
+                          border:`1px solid ${emaSlow===v?C.accent:C.border}`,
+                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
+                          fontSize:10,color:emaSlow===v?C.accent:C.text
+                        }}>{v}</div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {[21,34,55].map(v=>(
-                      <div key={v} onClick={()=>setEmaSlow(v)} style={{
-                        background:emaSlow===v?C.accentDim:C.card,
-                        border:`1px solid ${emaSlow===v?C.accent:C.border}`,
-                        borderRadius:4,padding:"5px 10px",cursor:"pointer",
-                        fontSize:11,color:emaSlow===v?C.accent:C.text
-                      }}>{v}</div>
-                    ))}
+                {/* ADX settings — only for ema_cross */}
+                {engine==="ema_cross" && (
+                  <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div>
+                        <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX PERIOD</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {[7,14,21].map(v=>(
+                            <div key={v} onClick={()=>setAdxPeriod(v)} style={{
+                              background:adxPeriod===v?C.accentDim:C.card,
+                              border:`1px solid ${adxPeriod===v?C.accent:C.border}`,
+                              borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                              fontSize:11,color:adxPeriod===v?C.accent:C.text
+                            }}>{v}</div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX THRESHOLD</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {[15,20,25,30].map(v=>(
+                            <div key={v} onClick={()=>setAdxThresh(v)} style={{
+                              background:adxThresh===v?C.accentDim:C.card,
+                              border:`1px solid ${adxThresh===v?C.accent:C.border}`,
+                              borderRadius:4,padding:"5px 10px",cursor:"pointer",
+                              fontSize:11,color:adxThresh===v?C.accent:C.text
+                            }}>{v}</div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
         </div>
-
-        {/* ATR Multiplier — only for breakout engine */}
-        {engine==="breakout" && (
-          <div style={{marginBottom:14,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
-            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>ATR Multiplier (Breakout SL)</span>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {[1.0,1.5,2.0,2.5,3.0].map(v=>(
-                <div key={v} onClick={()=>setAtrMult(v)} style={{
-                  background:atrMult===v?C.accentDim:C.card,
-                  border:`1px solid ${atrMult===v?C.accent:C.border}`,
-                  borderRadius:6,padding:"7px 14px",cursor:"pointer",
-                  fontSize:12,color:atrMult===v?C.accent:C.text,
-                  fontWeight:atrMult===v?700:400
-                }}>{v}x</div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Advanced */}
         <div onClick={()=>setShowAdv(!showAdv)} style={{
@@ -1779,10 +1802,10 @@ function App() {
       <div style={{marginBottom:20}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v8</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v9</span>
         </div>
         <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · Fees on notional · 1M · 5M · 15M · 1H · 4H · 1D</p>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · 2-Pivot Pullback · 1M · 15M · 1H</p>
       </div>
 
       <div style={{display:"flex",gap:0,marginBottom:20,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
