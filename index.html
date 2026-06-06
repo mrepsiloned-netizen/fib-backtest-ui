@@ -1044,9 +1044,11 @@ function PrefetchTab() {
   const [tf,        setTf]        = useState("1m");
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate,   setEndDate]   = useState("now");
-  const [status,    setStatus]    = useState(null);
-  const [polling,   setPolling]   = useState(false);
-  const [jobStatus, setJobStatus] = useState(null);
+  const [status,      setStatus]      = useState(null);
+  const [polling,     setPolling]     = useState(false);
+  const [jobStatus,   setJobStatus]   = useState(null);
+  const [batchLog,    setBatchLog]    = useState([]);
+  const [batchRunning,setBatchRunning]= useState(false);
 
   const prefetch = async () => {
     setStatus("queuing"); setJobStatus(null);
@@ -1056,6 +1058,25 @@ function PrefetchTab() {
       setStatus(data.status);
       setPolling(true);
     } catch(e) { setStatus("error"); }
+  };
+
+  const prefetchAll = async () => {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    setBatchLog([]);
+    for (const pair of ALL_PAIRS) {
+      setBatchLog(prev => [...prev, {pair, tf, status:"queuing"}]);
+      try {
+        const res  = await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:pair,timeframe:tf,start_date:startDate,end_date:endDate})});
+        const data = await res.json();
+        setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:data.status} : r));
+        // Wait 3 seconds between pairs to avoid hammering the exchange
+        await new Promise(r => setTimeout(r, 3000));
+      } catch(e) {
+        setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:"error"} : r));
+      }
+    }
+    setBatchRunning(false);
   };
 
   useEffect(() => {
@@ -1100,12 +1121,33 @@ function PrefetchTab() {
             }}/>
           </div>
         </div>
-        <button onClick={prefetch} disabled={polling} style={{
-          background:polling?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
-          padding:12,fontSize:13,fontWeight:800,cursor:polling?"not-allowed":"pointer",
+        <button onClick={prefetch} disabled={polling||batchRunning} style={{
+          background:polling||batchRunning?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
+          padding:12,fontSize:13,fontWeight:800,cursor:polling||batchRunning?"not-allowed":"pointer",
+          letterSpacing:"0.08em",width:"100%",marginBottom:8
+        }}>{polling?"⟳ FETCHING...":"⬇ PREFETCH THIS PAIR"}</button>
+        <button onClick={prefetchAll} disabled={batchRunning||polling} style={{
+          background:batchRunning?C.dim:C.accent,color:C.bg,border:"none",borderRadius:8,
+          padding:12,fontSize:13,fontWeight:800,cursor:batchRunning||polling?"not-allowed":"pointer",
           letterSpacing:"0.08em",width:"100%"
-        }}>{polling?"⟳ FETCHING...":"⬇ PREFETCH CANDLES"}</button>
+        }}>{batchRunning?"⟳ FETCHING ALL PAIRS...":"⬇⬇ PREFETCH ALL 6 PAIRS"}</button>
       </div>
+
+      {batchLog.length > 0 && (
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>
+            Batch Prefetch — {tf.toUpperCase()} · {startDate} → {endDate}
+          </div>
+          {batchLog.map(r=>(
+            <div key={r.pair} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:12,color:C.text}}>{r.pair}</span>
+              <span style={{fontSize:10,fontWeight:700,color:r.status==="done"?C.accent:r.status==="error"?C.red:C.gold}}>
+                {r.status==="done"?"✓ QUEUED":r.status==="error"?"✗ ERROR":r.status==="queuing"?"⟳ QUEUING...":"⟳ "+r.status.toUpperCase()}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {jobStatus && (
         <div style={{background:C.surface,border:`1px solid ${ready?C.accent:C.border}`,borderRadius:12,padding:16}}>
