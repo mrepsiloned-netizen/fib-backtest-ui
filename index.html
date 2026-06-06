@@ -46,6 +46,13 @@ const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
 const ALL_ENGINES    = ["original","bos_pivot","structure","pullback","ema_cross"];
 const ALL_ENTRY      = ["touch","rejection","reclaim"];
+const EMA_PAIRS = ["off","13/21","21/34","34/55","55/89","89/144","144/169"];
+const ADX_OPTS  = [0,10,15,20,25,30];
+function parseEma(pair) {
+  if (!pair || pair==="off") return {use:false, fast:34, slow:55};
+  const [f,s] = pair.split("/").map(Number);
+  return {use:true, fast:f, slow:s};
+}
 
 const PERIODS = [
   { label:"Last 7 Days",  start:null, end:"now", days:7 },
@@ -228,11 +235,8 @@ function SingleTab() {
   const [entryMode, setEntryMode] = useState("touch");
   const [engine,    setEngine]    = useState("pullback");
   const [showAdv,   setShowAdv]   = useState(false);
-  const [useEma,    setUseEma]    = useState(false);
-  const [emaFast,   setEmaFast]   = useState(34);
-  const [emaSlow,   setEmaSlow]   = useState(55);
-  const [adxPeriod, setAdxPeriod] = useState(14);
-  const [adxThresh, setAdxThresh] = useState(25);
+  const [emaPair,   setEmaPair]   = useState("off");   // "off" | "13/21" | "34/55" etc
+  const [adxMin,    setAdxMin]    = useState(0);       // 0=off, 10/15/20/25/30
   const [status,    setStatus]    = useState("idle");
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
@@ -267,8 +271,10 @@ function SingleTab() {
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
           entry_mode:entryMode, engine,
-          use_ema_filter:useEma, ema_fast:emaFast, ema_slow:emaSlow,
-          adx_period:adxPeriod, adx_threshold:adxThresh
+          use_ema_filter:parseEma(emaPair).use,
+          ema_fast:parseEma(emaPair).fast,
+          ema_slow:parseEma(emaPair).slow,
+          adx_period:14, adx_threshold:adxMin
         })
       });
       setPhase("Processing results...");
@@ -282,7 +288,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,useEma,emaFast,emaSlow,adxPeriod,adxThresh]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -322,90 +328,33 @@ function SingleTab() {
         {/* EMA Filter */}
         <div style={{marginBottom:14}}>
           <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
-            {engine==="ema_cross" ? "EMA Cross Settings" : "EMA Trend Filter"}
+            EMA Pair
           </span>
-          <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
-            {/* Toggle — hidden for ema_cross since it's always active */}
-            {engine!=="ema_cross" && (
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
-                <div onClick={()=>setUseEma(!useEma)} style={{
-                  background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
-                  borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
-                }}>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
-                  <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
-                    {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
-                  </span>
-                </div>
-              </div>
-            )}
-            {/* EMA pickers — show when filter is ON or ema_cross selected */}
-            {(useEma || engine==="ema_cross" || adxThresh > 0) && (
-              <div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:engine==="ema_cross"?12:0}}>
-                  <div>
-                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {[13,21,34,55,89,144].map(v=>(
-                        <div key={v} onClick={()=>setEmaFast(v)} style={{
-                          background:emaFast===v?C.accentDim:C.card,
-                          border:`1px solid ${emaFast===v?C.accent:C.border}`,
-                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                          fontSize:10,color:emaFast===v?C.accent:C.text
-                        }}>{v}</div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {[21,34,55,89,169,200].map(v=>(
-                        <div key={v} onClick={()=>setEmaSlow(v)} style={{
-                          background:emaSlow===v?C.accentDim:C.card,
-                          border:`1px solid ${emaSlow===v?C.accent:C.border}`,
-                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                          fontSize:10,color:emaSlow===v?C.accent:C.text
-                        }}>{v}</div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                {/* ADX settings — applies to ALL engines */}
-                <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:8,letterSpacing:"0.1em"}}>
-                    ADX FILTER — blocks trades in ranging markets (0 = off)
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <div>
-                      <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX PERIOD</div>
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                        {[7,14,21].map(v=>(
-                          <div key={v} onClick={()=>setAdxPeriod(v)} style={{
-                            background:adxPeriod===v?C.accentDim:C.card,
-                            border:`1px solid ${adxPeriod===v?C.accent:C.border}`,
-                            borderRadius:4,padding:"5px 10px",cursor:"pointer",
-                            fontSize:11,color:adxPeriod===v?C.accent:C.text
-                          }}>{v}</div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX MIN (0=off)</div>
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                        {[0,15,20,25,30].map(v=>(
-                          <div key={v} onClick={()=>setAdxThresh(v)} style={{
-                            background:adxThresh===v?C.accentDim:C.card,
-                            border:`1px solid ${adxThresh===v?C.accent:C.border}`,
-                            borderRadius:4,padding:"5px 10px",cursor:"pointer",
-                            fontSize:11,color:adxThresh===v?C.accent:C.text
-                          }}>{v===0?"Off":v}</div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {EMA_PAIRS.map(p=>(
+              <div key={p} onClick={()=>setEmaPair(p)} style={{
+                background:emaPair===p?C.accentDim:C.card,
+                border:`1px solid ${emaPair===p?C.accent:C.border}`,
+                borderRadius:6,padding:"6px 12px",cursor:"pointer",
+                fontSize:11,color:emaPair===p?C.accent:C.text,
+                fontWeight:emaPair===p?700:400
+              }}>{p==="off"?"Off":p}</div>
+            ))}
+          </div>
+
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
+            ADX Threshold (Off = no filter)
+          </span>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {ADX_OPTS.map(v=>(
+              <div key={v} onClick={()=>setAdxMin(v)} style={{
+                background:adxMin===v?C.accentDim:C.card,
+                border:`1px solid ${adxMin===v?C.accent:C.border}`,
+                borderRadius:6,padding:"6px 12px",cursor:"pointer",
+                fontSize:11,color:adxMin===v?C.accent:C.text,
+                fontWeight:adxMin===v?700:400
+              }}>{v===0?"Off":v}</div>
+            ))}
           </div>
         </div>
 
@@ -646,11 +595,8 @@ function MatrixTab() {
   const [selEngines,    setSelEngines]    = useState(["original"]);
   const [selEntryModes, setSelEntryModes] = useState(["touch"]);
   const [period,        setPeriod]        = useState(3);
-  const [useEma,        setUseEma]        = useState(false);
-  const [emaFast,       setEmaFast]       = useState(34);
-  const [emaSlow,       setEmaSlow]       = useState(55);
-  const [adxPeriod,     setAdxPeriod]     = useState(14);
-  const [adxThresh,     setAdxThresh]     = useState(0);
+  const [selEmaPairs,   setSelEmaPairs]   = useState(["off"]);
+  const [selAdxMins,    setSelAdxMins]    = useState([0]);
   const [status,        setStatus]        = useState("idle");
   const [results,       setResults]       = useState([]);
   const [progress,      setProgress]      = useState(0);
@@ -660,7 +606,7 @@ function MatrixTab() {
   const [error,         setError]         = useState("");
 
   const tog = (arr,setArr,val) => setArr(toggle(arr,val));
-  const totalCombos = selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length;
+  const totalCombos = selPairs.length*selTfs.length*selRisks.length*selPivots.length*selRR.length*selFibs.length*selEngines.length*selEntryModes.length*selEmaPairs.length*selAdxMins.length;
 
   const run = useCallback(async () => {
     if (!totalCombos) return;
@@ -670,10 +616,13 @@ function MatrixTab() {
     for(const sym of selPairs) for(const tf of selTfs) for(const risk of selRisks)
       for(const pn of selPivots) for(const rr of selRR) for(const fib of selFibs)
         for(const eng of selEngines) for(const em of selEntryModes)
-          configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,
-            pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,engine:eng,entry_mode:em,
-            use_ema_filter:useEma,ema_fast:emaFast,ema_slow:emaSlow,
-            adx_period:adxPeriod,adx_threshold:adxThresh});
+          for(const ep of selEmaPairs) for(const ax of selAdxMins) {
+            const ema = parseEma(ep);
+            configs.push({symbol:sym,timeframe:tf,start_date:start,end_date:end,
+              pivot_n:pn,risk_method:risk,risk_pct:0.02,rr,fib_level:fib,engine:eng,entry_mode:em,
+              use_ema_filter:ema.use, ema_fast:ema.fast, ema_slow:ema.slow,
+              adx_period:14, adx_threshold:ax});
+          }
     setTotal(configs.length);
     const allResults = [];
     for(let i=0; i<configs.length; i+=8) {
@@ -685,7 +634,7 @@ function MatrixTab() {
       } catch(e) { setError(e.message); }
     }
     setStatus("done");
-  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos,useEma,emaFast,emaSlow]);
+  }, [selPairs,selTfs,selRisks,selPivots,selRR,selFibs,selEngines,selEntryModes,period,totalCombos,selEmaPairs,selAdxMins]);
 
   const sorted = useMemo(() => {
     const ok = results.filter(r=>r.success&&r.stats);
@@ -740,83 +689,20 @@ function MatrixTab() {
           <Sel label="Period" value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
         </div>
 
-        {/* EMA Filter */}
+        {/* EMA + ADX Filters */}
         <div style={{marginBottom:14,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>EMA Trend Filter</span>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:useEma?12:0}}>
-            <div onClick={()=>setUseEma(!useEma)} style={{
-              background:useEma?C.accentDim:C.card,border:`1px solid ${useEma?C.accent:C.border}`,
-              borderRadius:6,padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:8
-            }}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:useEma?C.accent:C.muted}}/>
-              <span style={{fontSize:11,color:useEma?C.accent:C.muted,fontWeight:useEma?700:400}}>
-                {useEma?"ON — Filter by trend":"OFF — Trade all setups"}
-              </span>
+          <div style={{marginBottom:14}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>EMA Pairs</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {EMA_PAIRS.map(p=><Toggle key={p} label={p==="off"?"Off":p} value={selEmaPairs.includes(p)} onChange={()=>setSelEmaPairs(toggle(selEmaPairs,p))}/>)}
             </div>
           </div>
-          {(useEma || adxThresh > 0) && (
-            <div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                <div>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>FAST EMA</div>
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {[13,21,34,55,89,144].map(v=>(
-                      <div key={v} onClick={()=>setEmaFast(v)} style={{
-                        background:emaFast===v?C.accentDim:C.card,
-                        border:`1px solid ${emaFast===v?C.accent:C.border}`,
-                        borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                        fontSize:10,color:emaFast===v?C.accent:C.text
-                      }}>{v}</div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:6}}>SLOW EMA</div>
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {[21,34,55,89,169,200].map(v=>(
-                      <div key={v} onClick={()=>setEmaSlow(v)} style={{
-                        background:emaSlow===v?C.accentDim:C.card,
-                        border:`1px solid ${emaSlow===v?C.accent:C.border}`,
-                        borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                        fontSize:10,color:emaSlow===v?C.accent:C.text
-                      }}>{v}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{paddingTop:10,borderTop:`1px solid ${C.border}`}}>
-                <div style={{fontSize:9,color:C.muted,marginBottom:8}}>ADX FILTER (0=off)</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <div>
-                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX PERIOD</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {[7,14,21].map(v=>(
-                        <div key={v} onClick={()=>setAdxPeriod(v)} style={{
-                          background:adxPeriod===v?C.accentDim:C.card,
-                          border:`1px solid ${adxPeriod===v?C.accent:C.border}`,
-                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                          fontSize:10,color:adxPeriod===v?C.accent:C.text
-                        }}>{v}</div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,color:C.muted,marginBottom:6}}>ADX MIN</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {[0,15,20,25,30].map(v=>(
-                        <div key={v} onClick={()=>setAdxThresh(v)} style={{
-                          background:adxThresh===v?C.accentDim:C.card,
-                          border:`1px solid ${adxThresh===v?C.accent:C.border}`,
-                          borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                          fontSize:10,color:adxThresh===v?C.accent:C.text
-                        }}>{v===0?"Off":v}</div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div style={{marginBottom:14}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>ADX Threshold</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {ADX_OPTS.map(v=><Toggle key={v} label={v===0?"Off":String(v)} value={selAdxMins.includes(v)} onChange={()=>setSelAdxMins(toggle(selAdxMins,v))}/>)}
             </div>
-          )}
+          </div>
         </div>
 
         <button onClick={run} disabled={status==="loading"||!totalCombos} style={{
