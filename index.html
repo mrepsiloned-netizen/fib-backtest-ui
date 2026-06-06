@@ -1049,6 +1049,9 @@ function PrefetchTab() {
   const [jobStatus,   setJobStatus]   = useState(null);
   const [batchLog,    setBatchLog]    = useState([]);
   const [batchRunning,setBatchRunning]= useState(false);
+  const [deleting,    setDeleting]    = useState(false);
+  const [deleteLog,   setDeleteLog]   = useState([]);
+  const [showDelete,  setShowDelete]  = useState(false);
 
   const prefetch = async () => {
     setStatus("queuing"); setJobStatus(null);
@@ -1070,13 +1073,37 @@ function PrefetchTab() {
         const res  = await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:pair,timeframe:tf,start_date:startDate,end_date:endDate})});
         const data = await res.json();
         setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:data.status} : r));
-        // Wait 3 seconds between pairs to avoid hammering the exchange
         await new Promise(r => setTimeout(r, 3000));
       } catch(e) {
         setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:"error"} : r));
       }
     }
     setBatchRunning(false);
+  };
+
+  const deleteCandles = async (pairToDelete, wipeAll=false) => {
+    if (deleting) return;
+    const pairs = pairToDelete ? [pairToDelete] : ALL_PAIRS;
+    setDeleting(true);
+    setDeleteLog([]);
+    for (const pair of pairs) {
+      setDeleteLog(prev => [...prev, {pair, status:"deleting"}]);
+      try {
+        const body = wipeAll
+          ? {symbol:pair, timeframe:tf, start_date:"2020-01-01", end_date:"now"}
+          : {symbol:pair, timeframe:tf, start_date:startDate, end_date:endDate};
+        const res  = await fetch(`${API}/delete-candles`, {
+          method:"DELETE",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        setDeleteLog(prev => prev.map(r => r.pair===pair ? {...r, status:"deleted", count:data.deleted||0} : r));
+      } catch(e) {
+        setDeleteLog(prev => prev.map(r => r.pair===pair ? {...r, status:"error"} : r));
+      }
+    }
+    setDeleting(false);
   };
 
   useEffect(() => {
@@ -1148,6 +1175,61 @@ function PrefetchTab() {
           ))}
         </div>
       )}
+
+      {/* Delete Candles Section */}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        <div onClick={()=>setShowDelete(!showDelete)} style={{
+          display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"
+        }}>
+          <span style={{fontSize:10,color:C.red,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:700}}>
+            🗑 Delete Candle Data
+          </span>
+          <span style={{fontSize:10,color:C.muted}}>{showDelete?"▾":"▸"}</span>
+        </div>
+        {showDelete && (
+          <div style={{marginTop:12}}>
+            <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
+              Deletes candles from Supabase for the selected timeframe and date range. Use this to force a fresh fetch on next backtest run.
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              <button onClick={()=>deleteCandles(symbol)} disabled={deleting} style={{
+                background:deleting?C.dim:C.redDim,color:C.red,
+                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
+                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
+              }}>🗑 {symbol.replace("/USDT","")} (date range)</button>
+              <button onClick={()=>deleteCandles(null)} disabled={deleting} style={{
+                background:deleting?C.dim:C.redDim,color:C.red,
+                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
+                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
+              }}>🗑🗑 All Pairs (date range)</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <button onClick={()=>deleteCandles(symbol, true)} disabled={deleting} style={{
+                background:deleting?C.dim:C.redDim,color:C.red,
+                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
+                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
+              }}>🗑 {symbol.replace("/USDT","")} (ALL history)</button>
+              <button onClick={()=>deleteCandles(null, true)} disabled={deleting} style={{
+                background:deleting?C.dim:C.redDim,color:C.red,
+                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
+                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
+              }}>🗑🗑 All Pairs (ALL history)</button>
+            </div>
+            {deleteLog.length > 0 && (
+              <div style={{marginTop:10}}>
+                {deleteLog.map(r=>(
+                  <div key={r.pair} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>
+                    <span style={{fontSize:11,color:C.text}}>{r.pair}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:r.status==="deleted"?C.accent:r.status==="error"?C.red:C.muted}}>
+                      {r.status==="deleted"?`✓ Deleted ${r.count||""} rows`:r.status==="error"?"✗ Error":"⟳ Deleting..."}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {jobStatus && (
         <div style={{background:C.surface,border:`1px solid ${ready?C.accent:C.border}`,borderRadius:12,padding:16}}>
