@@ -66,10 +66,18 @@ const fmtRisk = (r)  => RISK_LABELS[r] || r;
 function getPeriodDates(p) {
   if (!p) return { start:"2025-01-01", end:"2026-01-01" };
   const now = new Date();
-  if (p.start) return { start:p.start, end:p.end };
-  if (p.days) {
+  // Rolling periods — always compute fresh from today
+  if (p.days && !p.start) {
     const d = new Date(now.getTime() - p.days * 86400000);
     return { start:d.toISOString().split("T")[0], end:"now" };
+  }
+  // Fixed periods with explicit start and end
+  if (p.start && p.end && p.end !== "now") {
+    return { start:p.start, end:p.end };
+  }
+  // Fixed start, open end (e.g. 2026 YTD)
+  if (p.start && p.end === "now") {
+    return { start:p.start, end:"now" };
   }
   return { start:"2025-01-01", end:"now" };
 }
@@ -208,7 +216,7 @@ function EntryChips({value,onChange}) {
 function SingleTab() {
   const [symbol,    setSymbol]    = useState("XRP/USDT");
   const [tf,        setTf]        = useState("1m");
-  const [period,    setPeriod]    = useState(3);
+  const [period,    setPeriod]    = useState(1);
   const [risk,      setRisk]      = useState("fixed");
   const [pivotN,    setPivotN]    = useState(8);
   const [rr,        setRr]        = useState(2);
