@@ -1724,6 +1724,20 @@ function MatrixRunnerTab() {
   const [filters,   setFilters]   = useState({min_return:0,min_sharpe:1,min_trades:30,max_dd:50});
   const [polling,   setPolling]   = useState(false);
 
+  const [starting,  setStarting]  = useState(false);
+  const [startMsg,  setStartMsg]  = useState("");
+
+  const startMatrix = async () => {
+    setStarting(true); setStartMsg("");
+    try {
+      const res  = await fetch(`${API}/run-matrix`, {method:"POST"});
+      const data = await res.json();
+      setStartMsg(data.message);
+      if (data.success) { setPolling(true); fetchStatus(); }
+    } catch(e) { setStartMsg("Error: " + e.message); }
+    setStarting(false);
+  };
+
   const fetchStatus = async () => {
     try {
       const res  = await fetch(`${API}/matrix-status`);
@@ -1808,17 +1822,30 @@ function MatrixRunnerTab() {
         </div>
       </div>
 
+      {/* Start Button */}
+      <div style={{marginBottom:16}}>
+        <button onClick={startMatrix} disabled={starting||isRunning} style={{
+          background:starting||isRunning?C.dim:C.accent,color:C.bg,border:"none",
+          borderRadius:8,padding:14,fontSize:13,fontWeight:800,
+          cursor:starting||isRunning?"not-allowed":"pointer",
+          letterSpacing:"0.08em",width:"100%"
+        }}>
+          {starting?"⟳ Starting...":isRunning?"⟳ Already Running...":"▶ START MATRIX RUNNER"}
+        </button>
+        {startMsg && <div style={{marginTop:8,fontSize:11,color:C.accent,textAlign:"center"}}>{startMsg}</div>}
+      </div>
+
       {/* Instructions */}
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
         <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>How to Run</div>
         <div style={{fontSize:11,color:C.text,lineHeight:1.6}}>
-          1. Send <span style={{color:C.accent,fontFamily:"monospace"}}>matrix_runner.py</span> to Waddle Deployer bot on Telegram<br/>
-          2. Railway will deploy and run it automatically as a background job<br/>
-          3. Results save to Supabase as they complete — check progress above<br/>
-          4. When done, use filters below and click Download CSV
+          1. Click <b>START MATRIX RUNNER</b> above — runs as background thread on Railway<br/>
+          2. Progress updates every 10 min via Telegram + live in Runner tab<br/>
+          3. Results save to Supabase as they complete<br/>
+          4. When done, filter and click Download CSV
         </div>
         <div style={{marginTop:10,fontSize:10,color:C.muted}}>
-          ⚠️ First run takes several hours. Use --resume flag to continue if interrupted.
+          ⚠️ Takes several hours. Don't redeploy while running — it will restart and stop the job.
         </div>
       </div>
 
