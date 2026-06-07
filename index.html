@@ -1772,20 +1772,19 @@ function MatrixRunnerTab() {
         min_sharpe: filters.min_sharpe,
         min_trades: filters.min_trades,
         max_dd:     filters.max_dd,
-        limit:      200000
       });
-      const res  = await fetch(`${API}/matrix-results/export?${params}`);
-      const data = await res.json();
-      if (data.success && data.csv) {
-        setCsvData(data.csv);
-        const blob = new Blob([data.csv], {type:"text/csv"});
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement("a");
-        a.href     = url;
-        a.download = `waddle_matrix_${new Date().toISOString().split("T")[0]}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const res = await fetch(`${API}/matrix-results/export?${params}`);
+      if (!res.ok) { setLoading(false); return; }
+      // Streaming response — get raw CSV text
+      const csv  = await res.text();
+      setCsvData(csv);
+      const blob = new Blob([csv], {type:"text/csv"});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `waddle_matrix_${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch(e) { console.error(e); }
     setLoading(false);
   };
