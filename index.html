@@ -1926,11 +1926,33 @@ function MatrixRunnerTab() {
           Return% · CAGR · MaxDD · Sharpe · PF · WR · Trades · Wins · Losses ·
           AvgWin · AvgLoss · Kelly · Fees · Period
         </div>
-        <button onClick={downloadCSV} disabled={loading} style={{
-          background:loading?C.dim:C.accent,color:C.bg,border:"none",borderRadius:8,
-          padding:12,fontSize:13,fontWeight:800,
-          cursor:loading?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
-        }}>{loading?"⟳ Preparing...":"⬇ DOWNLOAD RESULTS CSV"}</button>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={downloadCSV} disabled={loading} style={{
+            background:loading?C.dim:C.accent,color:C.bg,border:"none",borderRadius:8,
+            padding:12,fontSize:12,fontWeight:800,
+            cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
+          }}>{loading?"⟳ Loading...":"⬇ FILTERED CSV"}</button>
+          <button onClick={async()=>{
+            setLoading(true);
+            try {
+              const res = await fetch(`${API}/matrix-results/all`);
+              const csv = await res.text();
+              setCsvData(csv);
+              const blob=new Blob([csv],{type:"text/csv"});
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement("a");
+              a.href=url;
+              a.download=`waddle_matrix_all_${new Date().toISOString().split("T")[0]}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            } catch(e){console.error(e);}
+            setLoading(false);
+          }} disabled={loading} style={{
+            background:loading?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
+            padding:12,fontSize:12,fontWeight:800,
+            cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
+          }}>{loading?"⟳ Loading...":"⬇ ALL RESULTS"}</button>
+        </div>
         {csvData && (
           <div style={{marginTop:8,fontSize:10,color:C.accent,textAlign:"center"}}>
             ✓ Downloaded — check your downloads folder
