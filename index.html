@@ -653,7 +653,7 @@ function TradeChartViz({result, symbol, tf}) {
   const [loading,     setLoading]     = React.useState(false);
   const [error,       setError]       = React.useState("");
   const [selTradeIdx, setSelTradeIdx] = React.useState(null); // index into trades array
-  const THRESHOLD = 200; // max candles for snapshot view
+  const THRESHOLD = 300; // max candles for snapshot view
 
   const trades = React.useMemo(() => {
     if (!result?.trades) return [];
