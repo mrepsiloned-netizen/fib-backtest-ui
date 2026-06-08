@@ -697,14 +697,35 @@ function TradeChartViz({result, symbol, tf}) {
   const tsToIdx = {};
   visibleCandles.forEach((c,i) => { tsToIdx[c.ts] = i; });
 
+  // Helper: find nearest candle index for a timestamp (not exact match required)
+  const findNearestIdx = (ts) => {
+    if (!ts || !visibleCandles.length) return null;
+    // First try exact match
+    if (tsToIdx[ts] !== undefined) return tsToIdx[ts];
+    // Find closest candle by ts
+    let best = null, bestDiff = Infinity;
+    visibleCandles.forEach((c, i) => {
+      const diff = Math.abs(c.ts - ts);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    });
+    // Only use if within 5 candle-widths (avoids huge mismatches)
+    if (visibleCandles.length > 1) {
+      const tfMs = visibleCandles[1].ts - visibleCandles[0].ts;
+      if (bestDiff < tfMs * 5) return best;
+    }
+    return best;
+  };
+
   // For each trade, find indices of P1/P2/P3/entry/exit in visible window
   const tradeAnno = React.useMemo(() => {
     return trades.map((t, ti) => {
-      const tid     = t.id ?? (ti+1);
-      const entryI  = tsToIdx[t.entry_time];
-      const exitI   = tsToIdx[t.exit_time];
-      const p1I     = t.p1_time ? tsToIdx[t.p1_time] : null;
-      return {t, tid, entryI, exitI, p1I};
+      const tid    = t.id ?? (ti+1);
+      const entryI = findNearestIdx(t.entry_time);
+      const exitI  = findNearestIdx(t.exit_time);
+      const p1I    = findNearestIdx(t.p1_time);
+      const p2I    = findNearestIdx(t.p2_time);
+      const p3I    = findNearestIdx(t.p3_time);
+      return {t, tid, entryI, exitI, p1I, p2I, p3I};
     });
   }, [trades, visibleCandles]);
 
@@ -822,49 +843,45 @@ function TradeChartViz({result, symbol, tf}) {
                   const elems      = [];
 
                   // P1 marker
-                  if (p1I !== undefined && p1I !== null && t.p1) {
+                  if (p1I != null && t.p1) {
                     const x=toX(p1I), y=toY(t.p1);
                     elems.push(<g key="p1" opacity={opacity}>
-                      <circle cx={x} cy={y} r="3" fill="#ffd666" stroke="#ffd666" strokeWidth="1"/>
+                      <circle cx={x} cy={y} r="3" fill="#ffd666"/>
                       <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1[{tid}]</text>
                     </g>);
                   }
 
-                  // Entry marker — show P2 price as horizontal ref, label entry candle
-                  if (entryI !== undefined && entryI !== null) {
+                  // P2 marker — independent of entry
+                  if (p2I != null && t.p2) {
+                    const x=toX(p2I), y=toY(t.p2);
+                    elems.push(<g key="p2" opacity={opacity}>
+                      <circle cx={x} cy={y} r="3" fill="#3b8bff"/>
+                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
+                    </g>);
+                  }
+
+                  // P3 marker — independent of entry
+                  if (p3I != null && t.p3) {
+                    const x=toX(p3I), y=toY(t.p3);
+                    elems.push(<g key="p3" opacity={opacity}>
+                      <circle cx={x} cy={y} r="3" fill="#a78bfa"/>
+                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
+                    </g>);
+                  }
+
+                  // Entry marker
+                  if (entryI != null && t.entry) {
                     const x=toX(entryI), y=toY(t.entry);
                     const label = `${t.direction==="LONG"?"L":"S"}[${tid}]`;
                     elems.push(<g key="entry" opacity={opacity}>
                       <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
                       <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
                     </g>);
-                    // P2 dot at correct candle using p2_time
-                    if (t.p2 && t.p2_time) {
-                      const p2I = tsToIdx[t.p2_time];
-                      if (p2I !== undefined) {
-                        const xp2=toX(p2I), yp2=toY(t.p2);
-                        elems.push(<g key="p2" opacity={opacity}>
-                          <circle cx={xp2} cy={yp2} r="3" fill="#3b8bff" stroke="#3b8bff" strokeWidth="1"/>
-                          <text x={xp2} y={yp2-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
-                        </g>);
-                      }
-                    }
-                    // P3 dot at correct candle using p3_time
-                    if (t.p3 && t.p3_time) {
-                      const p3I = tsToIdx[t.p3_time];
-                      if (p3I !== undefined) {
-                        const xp3=toX(p3I), yp3=toY(t.p3);
-                        elems.push(<g key="p3" opacity={opacity}>
-                          <circle cx={xp3} cy={yp3} r="3" fill="#a78bfa" stroke="#a78bfa" strokeWidth="1"/>
-                          <text x={xp3} y={yp3-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
-                        </g>);
-                      }
-                    }
                   }
 
                   // Exit marker
-                  if (exitI !== undefined && exitI !== null) {
-                    const x=toX(exitI), y=toY(t.exit_price || t.tp || t.sl);
+                  if (exitI != null && t.exit_price) {
+                    const x=toX(exitI), y=toY(t.exit_price);
                     const label = `${t.result==="TP"?"TP":t.result==="SL"?"SL":"TO"}[${tid}]`;
                     elems.push(<g key="exit" opacity={opacity}>
                       <polygon points={`${x},${y+8} ${x-4},${y+14} ${x+4},${y+14}`} fill={exitCol}/>
