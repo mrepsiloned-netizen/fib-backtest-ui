@@ -598,9 +598,6 @@ function TradeChartViz({result, symbol, tf, period}) {
   const [viewStart,  setViewStart]  = React.useState(0);
   const CANDLES_VISIBLE = 80;
 
-  const SUPABASE_URL = "https://ybpetixarrflxoeyqdxt.supabase.co";
-  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlicGV0aXhhcnJmbHhvZXlxZHh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQwMjMyNzEsImV4cCI6MjA1OTU5OTI3MX0.2fRlPVpLNXwdgA5-hPPzlBZXLGh8xYqLKMNnHMFMH0A";
-
   const trades = result?.trades || [];
 
   React.useEffect(() => {
@@ -619,25 +616,21 @@ function TradeChartViz({result, symbol, tf, period}) {
       const startMs = minTs - pad;
       const endMs   = maxTs + pad;
 
-      const hdrs = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-      };
-      let all = [], offset = 0;
-      while (true) {
-        const q = `symbol=eq.${encodeURIComponent(symbol)}&timeframe=eq.${tf}&ts=gte.${startMs}&ts=lte.${endMs}&order=ts.asc&limit=5000&offset=${offset}&select=ts,open,high,low,close`;
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/candles?${q}`, {headers: hdrs});
-        if (!res.ok) throw new Error("Supabase error " + res.status);
-        const rows = await res.json();
-        if (!rows.length) break;
-        all = all.concat(rows);
-        if (rows.length < 5000) break;
-        offset += 5000;
-      }
+      // Fetch via Railway API — avoids CORS issues with direct Supabase access
+      const params = new URLSearchParams({
+        symbol, timeframe: tf,
+        start_ms: startMs, end_ms: endMs,
+        limit: 3000
+      });
+      const res = await fetch(`${API}/candles?${params}`);
+      if (!res.ok) throw new Error("API error " + res.status);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to load candles");
+      const all = data.candles || [];
       setCandles(all);
       // Default view: center around first trade entry
       if (all.length > 0 && trades.length > 0) {
-        const firstEntryTs = trades[trades.length-1]?.entry_time; // trades reversed
+        const firstEntryTs = trades[trades.length-1]?.entry_time;
         const idx = all.findIndex(c => c.ts >= firstEntryTs);
         const start = Math.max(0, (idx === -1 ? 0 : idx) - 20);
         setViewStart(start);
