@@ -842,51 +842,57 @@ function TradeChartViz({result, symbol, tf}) {
                   const exitCol    = t.result==="TP" ? "#00ff9d" : t.result==="SL" ? "#ff4466" : "#6e7681";
                   const elems      = [];
 
-                  // P1 marker
-                  if (p1I != null && t.p1) {
-                    const x=toX(p1I), y=toY(t.p1);
-                    elems.push(<g key="p1" opacity={opacity}>
-                      <circle cx={x} cy={y} r="3" fill="#ffd666"/>
-                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1[{tid}]</text>
-                    </g>);
-                  }
+                  // In snapshot mode — only show full labels for selected trade
+                  // Other trades: just a small dot at entry, no text
+                  const showLabels = !selTrade || isSelected;
 
-                  // P2 marker — independent of entry
-                  if (p2I != null && t.p2) {
-                    const x=toX(p2I), y=toY(t.p2);
-                    elems.push(<g key="p2" opacity={opacity}>
-                      <circle cx={x} cy={y} r="3" fill="#3b8bff"/>
-                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
-                    </g>);
-                  }
-
-                  // P3 marker — independent of entry
-                  if (p3I != null && t.p3) {
-                    const x=toX(p3I), y=toY(t.p3);
-                    elems.push(<g key="p3" opacity={opacity}>
-                      <circle cx={x} cy={y} r="3" fill="#a78bfa"/>
-                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
-                    </g>);
-                  }
-
-                  // Entry marker
-                  if (entryI != null && t.entry) {
-                    const x=toX(entryI), y=toY(t.entry);
-                    const label = `${t.direction==="LONG"?"L":"S"}[${tid}]`;
-                    elems.push(<g key="entry" opacity={opacity}>
-                      <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
-                      <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
-                    </g>);
-                  }
-
-                  // Exit marker
-                  if (exitI != null && t.exit_price) {
-                    const x=toX(exitI), y=toY(t.exit_price);
-                    const label = `${t.result==="TP"?"TP":t.result==="SL"?"SL":"TO"}[${tid}]`;
-                    elems.push(<g key="exit" opacity={opacity}>
-                      <polygon points={`${x},${y+8} ${x-4},${y+14} ${x+4},${y+14}`} fill={exitCol}/>
-                      <text x={x} y={y+22} textAnchor="middle" fontSize="7" fill={exitCol} fontWeight="700">{label}</text>
-                    </g>);
+                  if (!showLabels) {
+                    // Non-selected trade in snapshot: tiny dot only
+                    if (entryI != null && t.entry) {
+                      const x=toX(entryI), y=toY(t.entry);
+                      elems.push(<g key="entry" opacity={0.2}>
+                        <circle cx={x} cy={y} r="2" fill={entryCol}/>
+                      </g>);
+                    }
+                  } else {
+                    // Full labels — selected trade or browse mode
+                    if (p1I != null && t.p1) {
+                      const x=toX(p1I), y=toY(t.p1);
+                      elems.push(<g key="p1" opacity={opacity}>
+                        <circle cx={x} cy={y} r="3" fill="#ffd666"/>
+                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1[{tid}]</text>
+                      </g>);
+                    }
+                    if (p2I != null && t.p2) {
+                      const x=toX(p2I), y=toY(t.p2);
+                      elems.push(<g key="p2" opacity={opacity}>
+                        <circle cx={x} cy={y} r="3" fill="#3b8bff"/>
+                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
+                      </g>);
+                    }
+                    if (p3I != null && t.p3) {
+                      const x=toX(p3I), y=toY(t.p3);
+                      elems.push(<g key="p3" opacity={opacity}>
+                        <circle cx={x} cy={y} r="3" fill="#a78bfa"/>
+                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
+                      </g>);
+                    }
+                    if (entryI != null && t.entry) {
+                      const x=toX(entryI), y=toY(t.entry);
+                      const label = `${t.direction==="LONG"?"L":"S"}[${tid}]`;
+                      elems.push(<g key="entry" opacity={opacity}>
+                        <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
+                        <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
+                      </g>);
+                    }
+                    if (exitI != null && t.exit_price) {
+                      const x=toX(exitI), y=toY(t.exit_price);
+                      const label = `${t.result==="TP"?"TP":t.result==="SL"?"SL":"TO"}[${tid}]`;
+                      elems.push(<g key="exit" opacity={opacity}>
+                        <polygon points={`${x},${y+8} ${x-4},${y+14} ${x+4},${y+14}`} fill={exitCol}/>
+                        <text x={x} y={y+22} textAnchor="middle" fontSize="7" fill={exitCol} fontWeight="700">{label}</text>
+                      </g>);
+                    }
                   }
 
                   return <g key={tid}>{elems}</g>;
