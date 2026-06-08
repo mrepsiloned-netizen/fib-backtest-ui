@@ -649,12 +649,18 @@ function TradeChartViz({result, symbol, tf}) {
 
     if (selTrade) {
       // Snapshot mode: 10 before P1, 10 after exit
-      const p1Ts   = selTrade.p1_time   || selTrade.entry_time;
-      const exitTs = selTrade.exit_time  || selTrade.entry_time;
-      const p1Idx  = candles.findIndex(c => c.ts >= p1Ts);
-      const exIdx  = candles.findIndex(c => c.ts >= exitTs);
-      const s      = Math.max(0, (p1Idx  === -1 ? 0 : p1Idx)  - 10);
-      const e      = Math.min(candles.length - 1, (exIdx === -1 ? candles.length-1 : exIdx) + 10);
+      // Use earliest of p1/p2/p3 times as window start
+      const startTs = Math.min(
+        selTrade.p1_time   || Infinity,
+        selTrade.p2_time   || Infinity,
+        selTrade.p3_time   || Infinity,
+        selTrade.entry_time || Infinity
+      );
+      const exitTs  = selTrade.exit_time || selTrade.entry_time;
+      const p1Idx   = candles.findIndex(c => c.ts >= startTs);
+      const exIdx   = candles.findIndex(c => c.ts >= exitTs);
+      const s       = Math.max(0, (p1Idx  === -1 ? 0 : p1Idx)  - 10);
+      const e       = Math.min(candles.length - 1, (exIdx === -1 ? candles.length-1 : exIdx) + 10);
       const count  = e - s + 1;
       if (count > THRESHOLD) return {visibleCandles:[], tooWide:true, candleCount:count};
       return {visibleCandles: candles.slice(s, e+1), tooWide:false, candleCount:count};
@@ -832,21 +838,27 @@ function TradeChartViz({result, symbol, tf}) {
                       <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
                       <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
                     </g>);
-                    // P2 label near entry (P2 = SL level reference)
-                    if (t.p2) {
-                      const yp2=toY(t.p2);
-                      elems.push(<g key="p2" opacity={opacity}>
-                        <circle cx={x-6} cy={yp2} r="2.5" fill="#3b8bff"/>
-                        <text x={x-6} y={yp2-5} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
-                      </g>);
+                    // P2 dot at correct candle using p2_time
+                    if (t.p2 && t.p2_time) {
+                      const p2I = tsToIdx[t.p2_time];
+                      if (p2I !== undefined) {
+                        const xp2=toX(p2I), yp2=toY(t.p2);
+                        elems.push(<g key="p2" opacity={opacity}>
+                          <circle cx={xp2} cy={yp2} r="3" fill="#3b8bff" stroke="#3b8bff" strokeWidth="1"/>
+                          <text x={xp2} y={yp2-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
+                        </g>);
+                      }
                     }
-                    // P3 label near fib entry
-                    if (t.p3) {
-                      const yp3=toY(t.p3);
-                      elems.push(<g key="p3" opacity={opacity}>
-                        <circle cx={x+6} cy={yp3} r="2.5" fill="#a78bfa"/>
-                        <text x={x+6} y={yp3-5} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
-                      </g>);
+                    // P3 dot at correct candle using p3_time
+                    if (t.p3 && t.p3_time) {
+                      const p3I = tsToIdx[t.p3_time];
+                      if (p3I !== undefined) {
+                        const xp3=toX(p3I), yp3=toY(t.p3);
+                        elems.push(<g key="p3" opacity={opacity}>
+                          <circle cx={xp3} cy={yp3} r="3" fill="#a78bfa" stroke="#a78bfa" strokeWidth="1"/>
+                          <text x={xp3} y={yp3-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
+                        </g>);
+                      }
                     }
                   }
 
