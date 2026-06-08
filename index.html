@@ -590,250 +590,328 @@ function SingleTab() {
 
 
 // ── TRADE CHART VISUALIZER ─────────────────────────────────────
-function TradeChartViz({result, symbol, tf, period}) {
-  const [candles,    setCandles]    = React.useState([]);
-  const [loading,    setLoading]    = React.useState(false);
-  const [error,      setError]      = React.useState("");
-  const [selTrade,   setSelTrade]   = React.useState(null);
-  const [viewStart,  setViewStart]  = React.useState(0);
-  const CANDLES_VISIBLE = 80;
+function TradeChartViz({result, symbol, tf}) {
+  const [candles,     setCandles]     = React.useState([]);
+  const [loading,     setLoading]     = React.useState(false);
+  const [error,       setError]       = React.useState("");
+  const [selTradeIdx, setSelTradeIdx] = React.useState(null); // index into trades array
+  const THRESHOLD = 200; // max candles for snapshot view
 
-  const trades = result?.trades || [];
+  const trades = React.useMemo(() => {
+    if (!result?.trades) return [];
+    return [...result.trades].reverse(); // chronological order
+  }, [result]);
 
   React.useEffect(() => {
     if (!result) return;
     loadCandles();
   }, [result, symbol, tf]);
 
+  React.useEffect(() => {
+    // When trades load, default to trade 0 view
+    if (candles.length > 0 && trades.length > 0 && selTradeIdx === null) {
+      setSelTradeIdx(0);
+    }
+  }, [candles]);
+
   const loadCandles = async () => {
     setLoading(true); setError("");
     try {
-      const allTs = trades.flatMap(t => [t.entry_time, t.exit_time]).filter(Boolean);
+      const allTs = trades.flatMap(t => [t.entry_time, t.exit_time, t.p1_time]).filter(Boolean);
       if (allTs.length === 0) { setLoading(false); return; }
-      const minTs = Math.min(...allTs);
-      const maxTs = Math.max(...allTs);
-      const pad   = tf === "1h" ? 3600000*50 : tf === "15m" ? 900000*50 : tf === "5m" ? 300000*50 : 60000*100;
-      const startMs = minTs - pad;
-      const endMs   = maxTs + pad;
-
-      // Fetch via Railway API — avoids CORS issues with direct Supabase access
-      const params = new URLSearchParams({
-        symbol, timeframe: tf,
-        start_ms: startMs, end_ms: endMs,
-        limit: 3000
-      });
-      const res = await fetch(`${API}/candles?${params}`);
+      const tfMs  = tf==="1h"?3600000 : tf==="15m"?900000 : tf==="5m"?300000 : 60000;
+      const pad   = tfMs * 20;
+      const startMs = Math.min(...allTs) - pad;
+      const endMs   = Math.max(...allTs) + pad;
+      const params  = new URLSearchParams({symbol, timeframe:tf, start_ms:startMs, end_ms:endMs, limit:5000});
+      const res     = await fetch(`${API}/candles?${params}`);
       if (!res.ok) throw new Error("API error " + res.status);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Failed to load candles");
-      const all = data.candles || [];
-      setCandles(all);
-      // Default view: center around first trade entry
-      if (all.length > 0 && trades.length > 0) {
-        const firstEntryTs = trades[trades.length-1]?.entry_time;
-        const idx = all.findIndex(c => c.ts >= firstEntryTs);
-        const start = Math.max(0, (idx === -1 ? 0 : idx) - 20);
-        setViewStart(start);
-      }
-    } catch(e) {
-      setError("Cannot load candles: " + e.message);
-    }
+      const data    = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed");
+      setCandles(data.candles || []);
+    } catch(e) { setError("Cannot load candles: " + e.message); }
     setLoading(false);
   };
 
-  const visibleCandles = candles.slice(viewStart, viewStart + CANDLES_VISIBLE);
-
-  // Build trade markers indexed by candle ts
-  const tradeMarkers = {};
-  trades.forEach(t => {
-    if (t.entry_time) tradeMarkers[t.entry_time] = {...t, markerType: "entry"};
-    if (t.exit_time)  {
-      if (!tradeMarkers[t.exit_time]) tradeMarkers[t.exit_time] = {...t, markerType: "exit"};
-    }
-  });
-
-  // Chart dimensions
-  const W = 340, H = 240, PAD = {top:20, right:8, bottom:24, left:52};
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top  - PAD.bottom;
-
-  const prices = visibleCandles.flatMap(c => [c.high, c.low]);
-  if (selTrade) {
-    prices.push(selTrade.entry, selTrade.sl, selTrade.tp, selTrade.fib_entry || selTrade.entry);
-  }
-  const minP = prices.length ? Math.min(...prices) * 0.9995 : 0;
-  const maxP = prices.length ? Math.max(...prices) * 1.0005 : 1;
-  const priceRange = maxP - minP || 1;
-
-  const candleW = Math.max(2, chartW / CANDLES_VISIBLE - 1);
-  const toX = (i) => PAD.left + i * (chartW / CANDLES_VISIBLE) + candleW/2;
-  const toY = (p) => PAD.top  + chartH - ((p - minP) / priceRange) * chartH;
-
-  const scroll = (dir) => {
-    setViewStart(v => Math.max(0, Math.min(candles.length - CANDLES_VISIBLE, v + dir * Math.floor(CANDLES_VISIBLE/3))));
+  // ── Trade navigation ───────────────────────────────────────
+  const goTrade = (dir) => {
+    setSelTradeIdx(prev => {
+      const next = (prev === null ? 0 : prev) + dir;
+      return Math.max(0, Math.min(trades.length - 1, next));
+    });
   };
 
-  // Selected trade SL/TP/fib lines
-  const activeTrade = selTrade;
+  const selTrade = selTradeIdx !== null ? trades[selTradeIdx] : null;
+
+  // ── Compute visible candle window ──────────────────────────
+  const {visibleCandles, tooWide, candleCount} = React.useMemo(() => {
+    if (!candles.length) return {visibleCandles:[], tooWide:false, candleCount:0};
+
+    if (selTrade) {
+      // Snapshot mode: 10 before P1, 10 after exit
+      const p1Ts   = selTrade.p1_time   || selTrade.entry_time;
+      const exitTs = selTrade.exit_time  || selTrade.entry_time;
+      const p1Idx  = candles.findIndex(c => c.ts >= p1Ts);
+      const exIdx  = candles.findIndex(c => c.ts >= exitTs);
+      const s      = Math.max(0, (p1Idx  === -1 ? 0 : p1Idx)  - 10);
+      const e      = Math.min(candles.length - 1, (exIdx === -1 ? candles.length-1 : exIdx) + 10);
+      const count  = e - s + 1;
+      if (count > THRESHOLD) return {visibleCandles:[], tooWide:true, candleCount:count};
+      return {visibleCandles: candles.slice(s, e+1), tooWide:false, candleCount:count};
+    } else {
+      // Browse mode: show 80 candles centered around current trade
+      const t     = trades[selTradeIdx ?? 0];
+      const refTs = t?.entry_time || candles[0]?.ts;
+      const idx   = candles.findIndex(c => c.ts >= refTs);
+      const s     = Math.max(0, (idx === -1 ? 0 : idx) - 20);
+      return {visibleCandles: candles.slice(s, s+80), tooWide:false, candleCount:80};
+    }
+  }, [candles, selTrade, selTradeIdx, trades]);
+
+  // ── Chart drawing ──────────────────────────────────────────
+  const W = 345, H = 260, PAD = {top:24, right:10, bottom:24, left:54};
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top  - PAD.bottom;
+  const N      = visibleCandles.length || 1;
+
+  const allPrices = visibleCandles.flatMap(c => [c.high, c.low]);
+  if (selTrade) {
+    [selTrade.entry, selTrade.sl, selTrade.tp, selTrade.fib_entry,
+     selTrade.p1, selTrade.p2, selTrade.p3].forEach(v => { if(v) allPrices.push(v); });
+  }
+  const minP  = allPrices.length ? Math.min(...allPrices)*0.9994 : 0;
+  const maxP  = allPrices.length ? Math.max(...allPrices)*1.0006 : 1;
+  const range = maxP - minP || 1;
+
+  const cw  = Math.max(2, chartW/N - 1);
+  const toX = (i) => PAD.left + i*(chartW/N) + cw/2;
+  const toY = (p) => PAD.top  + chartH - ((p-minP)/range)*chartH;
+
+  // Map ts → candle index in visible window
+  const tsToIdx = {};
+  visibleCandles.forEach((c,i) => { tsToIdx[c.ts] = i; });
+
+  // For each trade, find indices of P1/P2/P3/entry/exit in visible window
+  const tradeAnno = React.useMemo(() => {
+    return trades.map((t, ti) => {
+      const tid     = t.id ?? (ti+1);
+      const entryI  = tsToIdx[t.entry_time];
+      const exitI   = tsToIdx[t.exit_time];
+      const p1I     = t.p1_time ? tsToIdx[t.p1_time] : null;
+      return {t, tid, entryI, exitI, p1I};
+    });
+  }, [trades, visibleCandles]);
+
+  // ── Render ─────────────────────────────────────────────────
+  if (loading) return (
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:20,marginBottom:16,textAlign:"center",color:C.muted,fontSize:11}}>
+      ⟳ Loading candles...
+    </div>
+  );
 
   return (
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:12,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-          📊 Trade Chart · {symbol} {tf?.toUpperCase()} · {candles.length} candles
+          📊 {symbol} {tf?.toUpperCase()} · {candles.length} candles
+          {selTrade ? ` · Trade #${selTrade.id ?? (selTradeIdx+1)} snapshot` : " · Browse"}
         </span>
-        <button onClick={loadCandles} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>↻ Reload</button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {selTrade && <button onClick={()=>setSelTradeIdx(null)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",color:C.muted,fontSize:9,cursor:"pointer"}}>✕ Deselect</button>}
+          <button onClick={loadCandles} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
+        </div>
       </div>
 
-      {loading && <div style={{textAlign:"center",padding:"30px 0",color:C.muted,fontSize:11}}>⟳ Loading candles from Supabase...</div>}
-      {error   && <div style={{color:C.red,fontSize:11,padding:"8px 12px",background:C.redDim,borderRadius:6,marginBottom:8}}>{error}</div>}
-
+      {error && <div style={{color:C.red,fontSize:11,padding:"8px 12px",background:C.redDim,borderRadius:6,marginBottom:8}}>{error}</div>}
       {!loading && candles.length === 0 && !error && (
-        <div style={{textAlign:"center",padding:"30px 0",color:C.muted,fontSize:11}}>
-          No candles found — run Prefetch for {symbol} {tf?.toUpperCase()} first
-        </div>
+        <div style={{textAlign:"center",padding:"30px 0",color:C.muted,fontSize:11}}>No candles — Prefetch {symbol} {tf?.toUpperCase()} first</div>
       )}
 
       {candles.length > 0 && (
         <div>
-          {/* Scroll controls */}
+          {/* Trade navigation */}
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <button onClick={()=>scroll(-3)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"4px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀◀</button>
-            <button onClick={()=>scroll(-1)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"4px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀</button>
-            <span style={{flex:1,textAlign:"center",fontSize:9,color:C.muted}}>
-              {visibleCandles[0] ? new Date(visibleCandles[0].ts).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
-              {" — "}
-              {visibleCandles[visibleCandles.length-1] ? new Date(visibleCandles[visibleCandles.length-1].ts).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
-            </span>
-            <button onClick={()=>scroll(1)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"4px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶</button>
-            <button onClick={()=>scroll(3)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"4px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶▶</button>
-          </div>
-
-          {/* SVG Chart */}
-          <div style={{overflowX:"auto"}}>
-            <svg width={W} height={H} style={{display:"block",margin:"0 auto",fontFamily:"IBM Plex Mono, monospace"}}>
-              {/* Background */}
-              <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} fill="#0d1117" rx="4"/>
-
-              {/* Grid lines */}
-              {[0,0.25,0.5,0.75,1].map(f => {
-                const y = PAD.top + f*chartH;
-                const p = maxP - f*priceRange;
-                return (
-                  <g key={f}>
-                    <line x1={PAD.left} y1={y} x2={PAD.left+chartW} y2={y} stroke="#1c2433" strokeWidth="0.5"/>
-                    <text x={PAD.left-4} y={y+3} textAnchor="end" fontSize="7" fill="#6e7681">{p.toFixed(4)}</text>
-                  </g>
-                );
-              })}
-
-              {/* Active trade SL/TP/Fib lines */}
-              {activeTrade && (
-                <>
-                  <line x1={PAD.left} y1={toY(activeTrade.tp)} x2={PAD.left+chartW} y2={toY(activeTrade.tp)} stroke="#00ff9d" strokeWidth="1" strokeDasharray="4,3" opacity="0.8"/>
-                  <text x={PAD.left+chartW+2} y={toY(activeTrade.tp)+3} fontSize="7" fill="#00ff9d">TP</text>
-                  <line x1={PAD.left} y1={toY(activeTrade.sl)} x2={PAD.left+chartW} y2={toY(activeTrade.sl)} stroke="#ff4466" strokeWidth="1" strokeDasharray="4,3" opacity="0.8"/>
-                  <text x={PAD.left+chartW+2} y={toY(activeTrade.sl)+3} fontSize="7" fill="#ff4466">SL</text>
-                  {activeTrade.fib_entry && (
-                    <>
-                      <line x1={PAD.left} y1={toY(activeTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(activeTrade.fib_entry)} stroke="#ffd666" strokeWidth="1" strokeDasharray="2,2" opacity="0.7"/>
-                      <text x={PAD.left+chartW+2} y={toY(activeTrade.fib_entry)+3} fontSize="7" fill="#ffd666">Fib</text>
-                    </>
-                  )}
-                </>
+            <button onClick={()=>goTrade(-5)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀◀</button>
+            <button onClick={()=>goTrade(-1)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀</button>
+            <div style={{flex:1,textAlign:"center"}}>
+              {selTrade ? (
+                <span style={{fontSize:10,color:selTrade.won?C.accent:selTrade.result==="TIMEOUT"?C.muted:C.red,fontWeight:700}}>
+                  Trade {selTradeIdx+1} / {trades.length} · #{selTrade.id ?? (selTradeIdx+1)} · {selTrade.direction} · {selTrade.result}
+                </span>
+              ) : (
+                <span style={{fontSize:10,color:C.muted}}>
+                  {visibleCandles[0] ? new Date(visibleCandles[0].ts).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
+                </span>
               )}
-
-              {/* Candles */}
-              {visibleCandles.map((c, i) => {
-                const x    = toX(i);
-                const yH   = toY(c.high);
-                const yL   = toY(c.low);
-                const yO   = toY(c.open);
-                const yC   = toY(c.close);
-                const bull = c.close >= c.open;
-                const col  = bull ? "#00ff9d" : "#ff4466";
-                const bodyTop = Math.min(yO, yC);
-                const bodyH   = Math.max(1, Math.abs(yC - yO));
-
-                // Check if any trade entry/exit at this candle's ts
-                const marker = tradeMarkers[c.ts];
-
-                return (
-                  <g key={c.ts}>
-                    {/* Wick */}
-                    <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth="1" opacity="0.7"/>
-                    {/* Body */}
-                    <rect x={x - candleW/2} y={bodyTop} width={candleW} height={bodyH} fill={col} opacity="0.85"/>
-                    {/* Trade markers */}
-                    {marker && marker.markerType === "entry" && (
-                      <g>
-                        <circle cx={x} cy={bodyTop - 8} r="4" fill={marker.direction==="LONG"?"#00ff9d":"#ff4466"} opacity="0.9"/>
-                        <text x={x} y={bodyTop - 13} textAnchor="middle" fontSize="6" fill={marker.direction==="LONG"?"#00ff9d":"#ff4466"}>
-                          {marker.direction==="LONG"?"L":"S"}
-                        </text>
-                      </g>
-                    )}
-                    {marker && marker.markerType === "exit" && (
-                      <g>
-                        <polygon points={`${x},${yL+14} ${x-4},${yL+6} ${x+4},${yL+6}`}
-                          fill={marker.result==="TP"?"#00ff9d":"#ff4466"} opacity="0.9"/>
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-
-              {/* Time labels */}
-              {visibleCandles.filter((_,i)=> i % Math.floor(CANDLES_VISIBLE/5) === 0).map((c,i) => {
-                const idx = visibleCandles.indexOf(c);
-                return (
-                  <text key={c.ts} x={toX(idx)} y={H-6} textAnchor="middle" fontSize="7" fill="#6e7681">
-                    {new Date(c.ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"})}
-                  </text>
-                );
-              })}
-            </svg>
+            </div>
+            <button onClick={()=>goTrade(1)}  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶</button>
+            <button onClick={()=>goTrade(5)}  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶▶</button>
           </div>
 
-          {/* Legend */}
-          <div style={{display:"flex",gap:12,marginTop:6,flexWrap:"wrap",fontSize:9,color:C.muted}}>
-            <span><span style={{color:"#00ff9d"}}>●</span> Long Entry</span>
-            <span><span style={{color:"#ff4466"}}>●</span> Short Entry</span>
-            <span><span style={{color:"#00ff9d"}}>▲</span> TP Exit</span>
-            <span><span style={{color:"#ff4466"}}>▲</span> SL Exit</span>
-            <span style={{marginLeft:"auto",color:C.gold}}>{trades.length} trades plotted</span>
-          </div>
-
-          {/* Trade selector */}
-          {trades.length > 0 && (
-            <div style={{marginTop:12}}>
-              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>
-                Click trade to highlight SL/TP/Fib on chart
-              </div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {[...trades].reverse().slice(0,15).map((t,i)=>(
-                  <div key={i} onClick={()=>{
-                    setSelTrade(selTrade?.id===t.id ? null : t);
-                    // Scroll chart to this trade
-                    const idx = candles.findIndex(c => c.ts >= t.entry_time);
-                    if (idx !== -1) setViewStart(Math.max(0, idx - 15));
-                  }} style={{
-                    background:selTrade?.id===t.id ? (t.won?C.accentDim:C.redDim) : C.card,
-                    border:`1px solid ${selTrade?.id===t.id ? (t.won?C.accent:C.red) : C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:9,
-                    color:t.won?C.accent:C.red,whiteSpace:"nowrap"
-                  }}>
-                    #{t.id} {t.direction==="LONG"?"L":"S"} {t.result}
-                  </div>
-                ))}
-              </div>
+          {/* Too wide warning */}
+          {tooWide && (
+            <div style={{textAlign:"center",padding:"24px",color:C.gold,fontSize:11,background:C.goldDim,borderRadius:8,marginBottom:8,border:`1px solid ${C.gold}`}}>
+              ⚠️ Trade snapshot too wide ({candleCount} candles &gt; {THRESHOLD} threshold)<br/>
+              <span style={{fontSize:9,color:C.muted}}>This trade held too long. Browse mode available.</span>
             </div>
           )}
+
+          {/* SVG Chart */}
+          {!tooWide && visibleCandles.length > 0 && (
+            <div style={{overflowX:"auto"}}>
+              <svg width={W} height={H} style={{display:"block",margin:"0 auto",fontFamily:"IBM Plex Mono,monospace"}}>
+                <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} fill="#0d1117" rx="3"/>
+
+                {/* Grid */}
+                {[0,0.25,0.5,0.75,1].map(f=>{
+                  const y=PAD.top+f*chartH, p=maxP-f*range;
+                  return <g key={f}>
+                    <line x1={PAD.left} y1={y} x2={PAD.left+chartW} y2={y} stroke="#1c2433" strokeWidth="0.5"/>
+                    <text x={PAD.left-3} y={y+3} textAnchor="end" fontSize="7" fill="#6e7681">{p.toFixed(5)}</text>
+                  </g>;
+                })}
+
+                {/* Selected trade SL / TP / Fib horizontal lines */}
+                {selTrade && (() => {
+                  const tid = selTrade.id ?? (selTradeIdx+1);
+                  return <>
+                    {selTrade.tp && <g>
+                      <line x1={PAD.left} y1={toY(selTrade.tp)} x2={PAD.left+chartW} y2={toY(selTrade.tp)} stroke="#00ff9d" strokeWidth="1" strokeDasharray="5,3"/>
+                      <text x={PAD.left+2} y={toY(selTrade.tp)-3} fontSize="7" fill="#00ff9d">TP[{tid}] {selTrade.tp}</text>
+                    </g>}
+                    {selTrade.sl && <g>
+                      <line x1={PAD.left} y1={toY(selTrade.sl)} x2={PAD.left+chartW} y2={toY(selTrade.sl)} stroke="#ff4466" strokeWidth="1" strokeDasharray="5,3"/>
+                      <text x={PAD.left+2} y={toY(selTrade.sl)-3} fontSize="7" fill="#ff4466">SL[{tid}] {selTrade.sl}</text>
+                    </g>}
+                    {selTrade.fib_entry && <g>
+                      <line x1={PAD.left} y1={toY(selTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(selTrade.fib_entry)} stroke="#ffd666" strokeWidth="1" strokeDasharray="3,2"/>
+                      <text x={PAD.left+2} y={toY(selTrade.fib_entry)-3} fontSize="7" fill="#ffd666">Fib[{tid}] {selTrade.fib_entry}</text>
+                    </g>}
+                    {selTrade.entry && <g>
+                      <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.7"/>
+                      <text x={PAD.left+2} y={toY(selTrade.entry)-3} fontSize="7" fill="#3b8bff">Fill[{tid}] {selTrade.entry}</text>
+                    </g>}
+                  </>;
+                })()}
+
+                {/* Candles */}
+                {visibleCandles.map((c,i)=>{
+                  const x   = toX(i), yH=toY(c.high), yL=toY(c.low);
+                  const yO  = toY(c.open), yC=toY(c.close);
+                  const bull= c.close>=c.open;
+                  const col = bull?"#00ff9d":"#ff4466";
+                  return <g key={c.ts}>
+                    <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth="1" opacity="0.6"/>
+                    <rect x={x-cw/2} y={Math.min(yO,yC)} width={cw} height={Math.max(1,Math.abs(yC-yO))} fill={col} opacity="0.85"/>
+                  </g>;
+                })}
+
+                {/* Trade annotations */}
+                {tradeAnno.map(({t, tid, entryI, exitI, p1I})=>{
+                  const isSelected = selTrade && (selTrade.id ?? (selTradeIdx+1)) === tid;
+                  const opacity    = selTrade && !isSelected ? 0.25 : 1;
+                  const entryCol   = t.direction==="LONG" ? "#00ff9d" : "#ff4466";
+                  const exitCol    = t.result==="TP" ? "#00ff9d" : t.result==="SL" ? "#ff4466" : "#6e7681";
+                  const elems      = [];
+
+                  // P1 marker
+                  if (p1I !== undefined && p1I !== null && t.p1) {
+                    const x=toX(p1I), y=toY(t.p1);
+                    elems.push(<g key="p1" opacity={opacity}>
+                      <circle cx={x} cy={y} r="3" fill="#ffd666" stroke="#ffd666" strokeWidth="1"/>
+                      <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1[{tid}]</text>
+                    </g>);
+                  }
+
+                  // Entry marker — show P2 price as horizontal ref, label entry candle
+                  if (entryI !== undefined && entryI !== null) {
+                    const x=toX(entryI), y=toY(t.entry);
+                    const label = `${t.direction==="LONG"?"L":"S"}[${tid}]`;
+                    elems.push(<g key="entry" opacity={opacity}>
+                      <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
+                      <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
+                    </g>);
+                    // P2 label near entry (P2 = SL level reference)
+                    if (t.p2) {
+                      const yp2=toY(t.p2);
+                      elems.push(<g key="p2" opacity={opacity}>
+                        <circle cx={x-6} cy={yp2} r="2.5" fill="#3b8bff"/>
+                        <text x={x-6} y={yp2-5} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
+                      </g>);
+                    }
+                    // P3 label near fib entry
+                    if (t.p3) {
+                      const yp3=toY(t.p3);
+                      elems.push(<g key="p3" opacity={opacity}>
+                        <circle cx={x+6} cy={yp3} r="2.5" fill="#a78bfa"/>
+                        <text x={x+6} y={yp3-5} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
+                      </g>);
+                    }
+                  }
+
+                  // Exit marker
+                  if (exitI !== undefined && exitI !== null) {
+                    const x=toX(exitI), y=toY(t.exit_price || t.tp || t.sl);
+                    const label = `${t.result==="TP"?"TP":t.result==="SL"?"SL":"TO"}[${tid}]`;
+                    elems.push(<g key="exit" opacity={opacity}>
+                      <polygon points={`${x},${y+8} ${x-4},${y+14} ${x+4},${y+14}`} fill={exitCol}/>
+                      <text x={x} y={y+22} textAnchor="middle" fontSize="7" fill={exitCol} fontWeight="700">{label}</text>
+                    </g>);
+                  }
+
+                  return <g key={tid}>{elems}</g>;
+                })}
+
+                {/* Time axis */}
+                {visibleCandles.filter((_,i)=>i%Math.max(1,Math.floor(N/5))===0).map((c,_,arr)=>{
+                  const i=visibleCandles.indexOf(c);
+                  return <text key={c.ts} x={toX(i)} y={H-6} textAnchor="middle" fontSize="7" fill="#6e7681">
+                    {new Date(c.ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"})}
+                  </text>;
+                })}
+              </svg>
+            </div>
+          )}
+
+          {/* Legend */}
+          <div style={{display:"flex",gap:10,marginTop:6,flexWrap:"wrap",fontSize:9,color:C.muted}}>
+            <span><span style={{color:"#00ff9d"}}>●</span> L[n] Long</span>
+            <span><span style={{color:"#ff4466"}}>●</span> S[n] Short</span>
+            <span><span style={{color:"#ffd666"}}>●</span> P1[n]</span>
+            <span><span style={{color:"#3b8bff"}}>●</span> P2[n]</span>
+            <span><span style={{color:"#a78bfa"}}>●</span> P3[n]</span>
+            <span><span style={{color:"#00ff9d"}}>▲</span>/<span style={{color:"#ff4466"}}>▲</span> Exit</span>
+            <span style={{marginLeft:"auto",color:C.gold}}>{trades.length} trades</span>
+          </div>
+
+          {/* Trade chips */}
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>
+              Select trade → zoom snapshot (10 candles before P1, 10 after exit)
+            </div>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {trades.map((t,i)=>{
+                const tid = t.id ?? (i+1);
+                const col = t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted;
+                const active = selTradeIdx === i;
+                return <div key={i} onClick={()=>setSelTradeIdx(active ? null : i)} style={{
+                  background: active?(t.result==="TP"?C.accentDim:t.result==="SL"?C.redDim:C.dim):C.card,
+                  border:`1px solid ${active?col:C.border}`,
+                  borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:9,
+                  color:col,whiteSpace:"nowrap"
+                }}>
+                  #{tid} {t.direction==="LONG"?"L":"S"} {t.result}
+                </div>;
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
 
 // ── PREFETCH TAB ───────────────────────────────────────────────
 function PrefetchTab() {
