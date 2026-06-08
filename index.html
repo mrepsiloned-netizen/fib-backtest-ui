@@ -690,8 +690,8 @@ function TradeChartViz({result, symbol, tf}) {
   const range = maxP - minP || 1;
 
   const cw  = Math.max(2, chartW/N - 1);
-  const toX = (i) => PAD.left + i*(chartW/N) + cw/2;
-  const toY = (p) => PAD.top  + chartH - ((p-minP)/range)*chartH;
+  const toX = (i) => { if (i == null || isNaN(i)) return -999; return PAD.left + i*(chartW/N) + cw/2; };
+  const toY = (p) => { if (p == null || isNaN(p)) return -999; return PAD.top + chartH - ((p-minP)/range)*chartH; };
 
   // Map ts → candle index in visible window
   const tsToIdx = {};
@@ -835,7 +835,7 @@ function TradeChartViz({result, symbol, tf}) {
                 })}
 
                 {/* Trade annotations */}
-                {tradeAnno.map(({t, tid, entryI, exitI, p1I})=>{
+                {tradeAnno.map(({t, tid, entryI, exitI, p1I, p2I, p3I})=>{
                   const isSelected = selTrade && (selTrade.id ?? (selTradeIdx+1)) === tid;
                   const opacity    = selTrade && !isSelected ? 0.25 : 1;
                   const entryCol   = t.direction==="LONG" ? "#00ff9d" : "#ff4466";
