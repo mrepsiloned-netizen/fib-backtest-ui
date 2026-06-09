@@ -675,12 +675,17 @@ function TradeChartViz({result, symbol, tf}) {
   const loadCandles = async () => {
     setLoading(true); setError("");
     try {
-      const allTs = trades.flatMap(t => [t.entry_time, t.exit_time, t.p1_time]).filter(Boolean);
+      const allTs = trades.flatMap(t => [t.entry_time, t.exit_time, t.p1_time, t.p2_time, t.p3_time]).filter(Boolean);
       if (allTs.length === 0) { setLoading(false); return; }
-      const tfMs  = tf==="1h"?3600000 : tf==="15m"?900000 : tf==="5m"?300000 : 60000;
-      const pad   = tfMs * 20;
-      const startMs = Math.min(...allTs) - pad;
-      const endMs   = Math.max(...allTs) + pad;
+      const tfMs    = tf==="1h"?3600000 : tf==="15m"?900000 : tf==="5m"?300000 : 60000;
+      // Start from earliest p1_time across all trades minus 15 candles
+      const p1Times = trades.map(t => t.p1_time).filter(Boolean);
+      const earliestP1 = p1Times.length ? Math.min(...p1Times) : Math.min(...allTs);
+      const startMs = earliestP1 - tfMs * 15;
+      // End at latest exit_time plus 15 candles
+      const exitTimes = trades.map(t => t.exit_time).filter(Boolean);
+      const latestExit = exitTimes.length ? Math.max(...exitTimes) : Math.max(...allTs);
+      const endMs   = latestExit + tfMs * 15;
       const params  = new URLSearchParams({symbol, timeframe:tf, start_ms:startMs, end_ms:endMs, limit:5000});
       const res     = await fetch(`${API}/candles?${params}`);
       if (!res.ok) throw new Error("API error " + res.status);
