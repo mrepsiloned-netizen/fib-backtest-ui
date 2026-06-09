@@ -707,18 +707,25 @@ function TradeChartViz({result, symbol, tf}) {
 
     if (selTrade) {
       // Snapshot mode: 10 before P1, 10 after exit
-      // Use earliest of p1/p2/p3 times as window start
-      const startTs = Math.min(
-        selTrade.p1_time   || Infinity,
-        selTrade.p2_time   || Infinity,
-        selTrade.p3_time   || Infinity,
-        selTrade.entry_time || Infinity
-      );
-      const exitTs  = selTrade.exit_time || selTrade.entry_time;
-      const p1Idx   = candles.findIndex(c => c.ts >= startTs);
-      const exIdx   = candles.findIndex(c => c.ts >= exitTs);
-      const s       = Math.max(0, (p1Idx  === -1 ? 0 : p1Idx)  - 10);
-      const e       = Math.min(candles.length - 1, (exIdx === -1 ? candles.length-1 : exIdx) + 10);
+      // Window: 10 candles before P1, 10 after exit
+      const p1Ts   = selTrade.p1_time || selTrade.entry_time;
+      const exitTs = selTrade.exit_time || selTrade.entry_time;
+      // Use nearest candle match for P1 and exit
+      let p1Idx = candles.findIndex(c => c.ts >= p1Ts);
+      if (p1Idx === -1) p1Idx = 0;
+      // Search nearest if exact not found
+      else {
+        let best = p1Idx, bestDiff = Math.abs(candles[p1Idx].ts - p1Ts);
+        for (let k = Math.max(0,p1Idx-3); k <= Math.min(candles.length-1,p1Idx+3); k++) {
+          const d = Math.abs(candles[k].ts - p1Ts);
+          if (d < bestDiff) { bestDiff = d; best = k; }
+        }
+        p1Idx = best;
+      }
+      let exIdx = candles.findIndex(c => c.ts >= exitTs);
+      if (exIdx === -1) exIdx = candles.length - 1;
+      const s = Math.max(0, p1Idx - 10);
+      const e = Math.min(candles.length - 1, exIdx + 10);
       const count  = e - s + 1;
       if (count > THRESHOLD) return {visibleCandles:[], tooWide:true, candleCount:count};
       return {visibleCandles: candles.slice(s, e+1), tooWide:false, candleCount:count};
@@ -873,10 +880,15 @@ function TradeChartViz({result, symbol, tf}) {
                       <line x1={PAD.left} y1={toY(selTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(selTrade.fib_entry)} stroke="#ffd666" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
                       <text x={PAD.left-3} y={toY(selTrade.fib_entry)+3} textAnchor="end" fontSize="7" fill="#ffd666" opacity="0.8">Fib</text>
                     </g>}
-                    {selTrade.entry && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
-                      <text x={PAD.left-3} y={toY(selTrade.entry)+3} textAnchor="end" fontSize="7" fill="#3b8bff" opacity="0.8">Fill</text>
-                    </g>}
+                    {selTrade.entry && (() => {
+                      // Only show Fill line if meaningfully different from Fib level
+                      const fibDiff = selTrade.fib_entry ? Math.abs(selTrade.entry - selTrade.fib_entry) / selTrade.fib_entry : 1;
+                      if (fibDiff < 0.0005) return null; // too close to Fib, skip
+                      return <g>
+                        <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
+                        <text x={PAD.left-3} y={toY(selTrade.entry)+3} textAnchor="end" fontSize="7" fill="#3b8bff" opacity="0.8">Fill</text>
+                      </g>;
+                    })()}
                   </>;
                 })()}
 
