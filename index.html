@@ -764,26 +764,35 @@ function TradeChartViz({result, symbol, tf}) {
   const toY = (p) => { if (p == null || isNaN(p)) return -999; return PAD.top + chartH - ((p-minP)/range)*chartH; };
 
   // Map ts → candle index in visible window
+  // Build global index map from ALL fetched candles
+  const globalTsToIdx = React.useMemo(() => {
+    const m = {};
+    candles.forEach((c, i) => { m[c.ts] = i; });
+    return m;
+  }, [candles]);
+
   const tsToIdx = {};
   visibleCandles.forEach((c,i) => { tsToIdx[c.ts] = i; });
 
-  // Helper: find nearest candle index for a timestamp (not exact match required)
+  // Find nearest index in ALL candles, then offset to visible window position
   const findNearestIdx = (ts) => {
-    if (!ts || !visibleCandles.length) return null;
-    // First try exact match
-    if (tsToIdx[ts] !== undefined) return tsToIdx[ts];
-    // Find closest candle by ts
-    let best = null, bestDiff = Infinity;
-    visibleCandles.forEach((c, i) => {
-      const diff = Math.abs(c.ts - ts);
-      if (diff < bestDiff) { bestDiff = diff; best = i; }
-    });
-    // Only use if within 5 candle-widths (avoids huge mismatches)
-    if (visibleCandles.length > 1) {
-      const tfMs = visibleCandles[1].ts - visibleCandles[0].ts;
-      if (bestDiff < tfMs * 5) return best;
+    if (!ts || !candles.length) return null;
+    // Exact match in global
+    let globalIdx = globalTsToIdx[ts];
+    if (globalIdx === undefined) {
+      // Find nearest in all candles
+      let best = 0, bestDiff = Infinity;
+      candles.forEach((c, i) => {
+        const diff = Math.abs(c.ts - ts);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+      });
+      globalIdx = best;
     }
-    return best;
+    // Convert global index to visible window index
+    const visStart = candles.indexOf(visibleCandles[0]);
+    const visEnd   = visStart + visibleCandles.length - 1;
+    if (globalIdx < visStart || globalIdx > visEnd) return null;
+    return globalIdx - visStart;
   };
 
   // For each trade, find indices of P1/P2/P3/entry/exit in visible window
