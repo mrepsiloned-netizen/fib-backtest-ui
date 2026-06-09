@@ -862,20 +862,20 @@ function TradeChartViz({result, symbol, tf}) {
                   const tid = selTrade.id ?? (selTradeIdx+1);
                   return <>
                     {selTrade.tp && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.tp)} x2={PAD.left+chartW} y2={toY(selTrade.tp)} stroke="#00ff9d" strokeWidth="1" strokeDasharray="5,3"/>
-                      <text x={PAD.left+2} y={toY(selTrade.tp)-3} fontSize="7" fill="#00ff9d">TP[{tid}] {selTrade.tp}</text>
+                      <line x1={PAD.left} y1={toY(selTrade.tp)} x2={PAD.left+chartW} y2={toY(selTrade.tp)} stroke="#00ff9d" strokeWidth="0.8" strokeDasharray="4,3" opacity="0.6"/>
+                      <text x={PAD.left-3} y={toY(selTrade.tp)+3} textAnchor="end" fontSize="7" fill="#00ff9d" opacity="0.9">TP</text>
                     </g>}
                     {selTrade.sl && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.sl)} x2={PAD.left+chartW} y2={toY(selTrade.sl)} stroke="#ff4466" strokeWidth="1" strokeDasharray="5,3"/>
-                      <text x={PAD.left+2} y={toY(selTrade.sl)-3} fontSize="7" fill="#ff4466">SL[{tid}] {selTrade.sl}</text>
+                      <line x1={PAD.left} y1={toY(selTrade.sl)} x2={PAD.left+chartW} y2={toY(selTrade.sl)} stroke="#ff4466" strokeWidth="0.8" strokeDasharray="4,3" opacity="0.6"/>
+                      <text x={PAD.left-3} y={toY(selTrade.sl)+3} textAnchor="end" fontSize="7" fill="#ff4466" opacity="0.9">SL</text>
                     </g>}
                     {selTrade.fib_entry && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(selTrade.fib_entry)} stroke="#ffd666" strokeWidth="1" strokeDasharray="3,2"/>
-                      <text x={PAD.left+2} y={toY(selTrade.fib_entry)-3} fontSize="7" fill="#ffd666">Fib[{tid}] {selTrade.fib_entry}</text>
+                      <line x1={PAD.left} y1={toY(selTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(selTrade.fib_entry)} stroke="#ffd666" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
+                      <text x={PAD.left-3} y={toY(selTrade.fib_entry)+3} textAnchor="end" fontSize="7" fill="#ffd666" opacity="0.8">Fib</text>
                     </g>}
                     {selTrade.entry && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.7"/>
-                      <text x={PAD.left+2} y={toY(selTrade.entry)-3} fontSize="7" fill="#3b8bff">Fill[{tid}] {selTrade.entry}</text>
+                      <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
+                      <text x={PAD.left-3} y={toY(selTrade.entry)+3} textAnchor="end" fontSize="7" fill="#3b8bff" opacity="0.8">Fill</text>
                     </g>}
                   </>;
                 })()}
@@ -914,25 +914,28 @@ function TradeChartViz({result, symbol, tf}) {
                     }
                   } else {
                     // Full labels — selected trade or browse mode
-                    if (p1I != null && t.p1) {
-                      const x=toX(p1I), y=toY(t.p1);
-                      elems.push(<g key="p1" opacity={opacity}>
-                        <circle cx={x} cy={y} r="3" fill="#ffd666"/>
-                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1[{tid}]</text>
+                    // P1 subtle vertical dotted line + x-axis label
+                    if (p1I != null) {
+                      const x=toX(p1I);
+                      elems.push(<g key="p1" opacity={showLabels ? opacity : 0.15}>
+                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#ffd666" strokeWidth="1" strokeDasharray="2,3"/>
+                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1</text>
                       </g>);
                     }
-                    if (p2I != null && t.p2) {
-                      const x=toX(p2I), y=toY(t.p2);
-                      elems.push(<g key="p2" opacity={opacity}>
-                        <circle cx={x} cy={y} r="3" fill="#3b8bff"/>
-                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2[{tid}]</text>
+                    // P2 subtle vertical dotted line + x-axis label
+                    if (p2I != null) {
+                      const x=toX(p2I);
+                      elems.push(<g key="p2" opacity={showLabels ? opacity : 0.15}>
+                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#3b8bff" strokeWidth="1" strokeDasharray="2,3"/>
+                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2</text>
                       </g>);
                     }
-                    if (p3I != null && t.p3) {
-                      const x=toX(p3I), y=toY(t.p3);
-                      elems.push(<g key="p3" opacity={opacity}>
-                        <circle cx={x} cy={y} r="3" fill="#a78bfa"/>
-                        <text x={x} y={y-6} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3[{tid}]</text>
+                    // P3 subtle vertical dotted line + x-axis label
+                    if (p3I != null) {
+                      const x=toX(p3I);
+                      elems.push(<g key="p3" opacity={showLabels ? opacity : 0.15}>
+                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#a78bfa" strokeWidth="1" strokeDasharray="2,3"/>
+                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3</text>
                       </g>);
                     }
                     if (entryI != null && t.entry) {
