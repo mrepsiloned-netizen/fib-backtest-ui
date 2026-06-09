@@ -715,20 +715,18 @@ function TradeChartViz({result, symbol, tf}) {
       // Window: 10 candles before P1, 10 after exit
       const p1Ts   = selTrade.p1_time || selTrade.entry_time;
       const exitTs = selTrade.exit_time || selTrade.entry_time;
-      // Use nearest candle match for P1 and exit
-      let p1Idx = candles.findIndex(c => c.ts >= p1Ts);
-      if (p1Idx === -1) p1Idx = 0;
-      // Search nearest if exact not found
-      else {
-        let best = p1Idx, bestDiff = Math.abs(candles[p1Idx].ts - p1Ts);
-        for (let k = Math.max(0,p1Idx-3); k <= Math.min(candles.length-1,p1Idx+3); k++) {
-          const d = Math.abs(candles[k].ts - p1Ts);
-          if (d < bestDiff) { bestDiff = d; best = k; }
-        }
-        p1Idx = best;
-      }
-      let exIdx = candles.findIndex(c => c.ts >= exitTs);
-      if (exIdx === -1) exIdx = candles.length - 1;
+      // Find p1Idx - nearest candle to p1_time
+      let p1Idx = 0, p1BestDiff = Infinity;
+      candles.forEach((c, i) => {
+        const d = Math.abs(c.ts - p1Ts);
+        if (d < p1BestDiff) { p1BestDiff = d; p1Idx = i; }
+      });
+      // Find exIdx - nearest candle to exit_time
+      let exIdx = candles.length - 1, exBestDiff = Infinity;
+      candles.forEach((c, i) => {
+        const d = Math.abs(c.ts - exitTs);
+        if (d < exBestDiff) { exBestDiff = d; exIdx = i; }
+      });
       const s = Math.max(0, p1Idx - 10);
       const e = Math.min(candles.length - 1, exIdx + 10);
       const count  = e - s + 1;
