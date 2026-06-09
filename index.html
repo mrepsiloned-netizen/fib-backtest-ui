@@ -713,6 +713,9 @@ function TradeChartViz({result, symbol, tf}) {
     if (selTrade) {
       // Snapshot mode: 10 before P1, 10 after exit
       // Window: 10 candles before P1, 10 after exit
+      // DEBUG
+      console.log('P1 time:', selTrade.p1_time, new Date(selTrade.p1_time));
+      console.log('Candles range:', candles[0]?.ts, new Date(candles[0]?.ts), '→', candles[candles.length-1]?.ts, new Date(candles[candles.length-1]?.ts));
       const p1Ts   = selTrade.p1_time || selTrade.entry_time;
       const exitTs = selTrade.exit_time || selTrade.entry_time;
       // Use nearest candle match for P1 and exit
@@ -775,6 +778,9 @@ function TradeChartViz({result, symbol, tf}) {
   visibleCandles.forEach((c,i) => { tsToIdx[c.ts] = i; });
 
   // Find nearest index in ALL candles, then offset to visible window position
+  const visStartTs = visibleCandles.length > 0 ? visibleCandles[0].ts : 0;
+  const visEndTs   = visibleCandles.length > 0 ? visibleCandles[visibleCandles.length-1].ts : 0;
+
   const findNearestIdx = (ts) => {
     if (!ts || !candles.length) return null;
     // Exact match in global
@@ -788,11 +794,12 @@ function TradeChartViz({result, symbol, tf}) {
       });
       globalIdx = best;
     }
-    // Convert global index to visible window index
-    const visStart = candles.indexOf(visibleCandles[0]);
-    const visEnd   = visStart + visibleCandles.length - 1;
-    if (globalIdx < visStart || globalIdx > visEnd) return null;
-    return globalIdx - visStart;
+    // Check if this candle is within visible window using timestamps
+    const cTs = candles[globalIdx].ts;
+    if (cTs < visStartTs || cTs > visEndTs) return null;
+    // Find position within visibleCandles
+    const visIdx = visibleCandles.findIndex(c => c.ts === cTs);
+    return visIdx === -1 ? null : visIdx;
   };
 
   // For each trade, find indices of P1/P2/P3/entry/exit in visible window
