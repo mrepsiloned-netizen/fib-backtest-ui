@@ -45,9 +45,17 @@ const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
 const ALL_ENGINES    = ["original","bos_pivot","structure","pullback","ema_cross"];
-const ALL_ENTRY      = ["touch","rejection","reclaim"];
+const ALL_ENTRY      = ["touch","rejection"];
 const EMA_PAIRS = ["off","13/21","21/34","34/55","55/89","89/144","144/169"];
 const ADX_OPTS  = [0,10,15,20,25,30];
+const ATR_SL_OPTS = [
+  {value:"p2",   label:"P2",     desc:"Structure SL"},
+  {value:"1atr",  label:"1 ATR",  desc:"Tight"},
+  {value:"1.5atr",label:"1.5 ATR",desc:"Balanced"},
+  {value:"2atr",  label:"2 ATR",  desc:"Standard"},
+  {value:"2.5atr",label:"2.5 ATR",desc:"Wide"},
+  {value:"3atr",  label:"3 ATR",  desc:"Max room"},
+];
 function parseEma(pair) {
   if (!pair || pair==="off") return {use:false, fast:34, slow:55};
   const [f,s] = pair.split("/").map(Number);
@@ -170,11 +178,7 @@ function ChipRow({label,options,selected,onSelect,color}) {
 
 function EngineChips({value,onChange}) {
   const engines = [
-    {value:"original",  label:"Original",       desc:"LH→LL→LH triplet"},
-    {value:"bos_pivot", label:"BOS Pivot",       desc:"P1→P3 fixed fib"},
-    {value:"structure", label:"2-Pivot Pullback",desc:"2 pivot highs→fib"},
     {value:"pullback",  label:"BOS Pullback",    desc:"BOS→keeps rebasing"},
-    {value:"ema_cross", label:"EMA Cross",       desc:"144/169 pullback+ADX"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -199,7 +203,6 @@ function EntryChips({value,onChange}) {
   const modes = [
     {value:"touch",     label:"Touch",     desc:"Fib hit = fill"},
     {value:"rejection", label:"Rejection", desc:"Wick + close back"},
-    {value:"reclaim",   label:"Reclaim",   desc:"Close through, recover"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -233,6 +236,7 @@ function SingleTab() {
   const [stopBuf,   setStopBuf]   = useState(0.001);
   const [kStale,    setKStale]    = useState(0);
   const [entryMode, setEntryMode] = useState("touch");
+  const [atrSl,     setAtrSl]     = useState("p2");
   const [engine,    setEngine]    = useState("pullback");
   const [showAdv,   setShowAdv]   = useState(false);
   const [emaPair,   setEmaPair]   = useState("off");   // "off" | "13/21" | "34/55" etc
@@ -270,7 +274,7 @@ function SingleTab() {
           symbol, timeframe:tf, start_date:start, end_date:end,
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
-          entry_mode:entryMode, engine,
+          entry_mode:entryMode, engine, atr_sl:atrSl,
           use_ema_filter:parseEma(emaPair).use,
           ema_fast:parseEma(emaPair).fast,
           ema_slow:parseEma(emaPair).slow,
@@ -327,6 +331,21 @@ function SingleTab() {
 
         {/* EMA Filter */}
         <div style={{marginBottom:14}}>
+          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
+            Stop Loss Mode
+          </span>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+            {ATR_SL_OPTS.map(o=>(
+              <div key={o.value} onClick={()=>setAtrSl(o.value)} style={{
+                background:atrSl===o.value?C.accentDim:C.surface,
+                border:`1px solid ${atrSl===o.value?C.accent:C.border}`,
+                borderRadius:8,padding:"8px 6px",cursor:"pointer",textAlign:"center"
+              }}>
+                <div style={{fontSize:11,color:atrSl===o.value?C.accent:C.text,fontWeight:atrSl===o.value?700:400}}>{o.label}</div>
+                <div style={{fontSize:9,color:C.muted,marginTop:2}}>{o.desc}</div>
+              </div>
+            ))}
+          </div>
           <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
             EMA Pair
           </span>
@@ -484,7 +503,7 @@ function SingleTab() {
           {/* Charts */}
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
             <div style={{display:"flex",borderBottom:`1px solid ${C.border}`}}>
-              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL Bar"],["data","Trade Data"]].map(([id,label])=>(
+              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL Bar"]].map(([id,label])=>(
                 <button key={id} onClick={()=>setChartTab(id)} style={{
                   flex:1,padding:"10px 8px",background:chartTab===id?C.card:"transparent",
                   color:chartTab===id?C.accent:C.muted,border:"none",
@@ -1011,9 +1030,7 @@ function TradeChartViz({result, symbol, tf}) {
 
           {/* Trade chips */}
           <div style={{marginTop:10}}>
-            <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>
-              Select trade → zoom snapshot (10 candles before P1, 10 after exit)
-            </div>
+
             <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
               {trades.map((t,i)=>{
                 const tid = t.id ?? (i+1);
