@@ -1852,13 +1852,14 @@ function MatrixRunnerTab() {
   const VARS = [
     ["Pairs",      ["DOGE","XLM","XRP","ADA","TRX","ARB"]],
     ["Timeframes", ["5m","15m","1h"]],
-    ["Engines",    ["Original","BOS Pivot","2-Pivot Pullback","BOS Pullback","EMA Cross"]],
-    ["Entry Modes",["Touch","Rejection","Reclaim"]],
+    ["Engines",    ["BOS Pullback"]],
+    ["Entry Modes",["Touch","Rejection"]],
     ["Pivot N",    [3,5,8]],
     ["RR Ratios",  [1.5,2.0,3.0,4.0]],
     ["Fib Levels", [0.382,0.5,0.618]],
     ["EMA Pairs",  ["Off","34/55","55/89","89/144","144/169"]],
     ["ADX Min",    ["Off(0)",15,25]],
+    ["ATR SL",     ["P2","1 ATR","1.5 ATR","2 ATR","2.5 ATR","3 ATR"]],
   ];
 
   return (
@@ -1928,7 +1929,7 @@ function MatrixRunnerTab() {
         <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
           Variables Being Tested
           <span style={{marginLeft:8,color:C.accent,fontSize:11,fontWeight:700}}>
-            145,800 combos
+            116,640 combos
           </span>
         </div>
         {VARS.map(([label,vals])=>(
