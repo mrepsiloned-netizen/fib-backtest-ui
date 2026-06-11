@@ -36,6 +36,7 @@ const C = {
   accent:"#00ff9d", accentDim:"#00ff9d15", red:"#ff4466", redDim:"#ff446615",
   gold:"#ffd666", goldDim:"#ffd66615", blue:"#3b8bff", blueDim:"#3b8bff15",
   text:"#e6edf3", muted:"#6e7681", dim:"#21262d",
+  purple:"#b388ff", purpleDim:"#b388ff15",
 };
 
 const ALL_PAIRS      = ["XRP/USDT","DOGE/USDT","TRX/USDT","XLM/USDT","ADA/USDT","ARB/USDT"];
@@ -2019,6 +2020,464 @@ function MatrixRunnerTab() {
   );
 }
 
+// ── FABLE TAB ──────────────────────────────────────────────────
+// Pivot H/L structure indicator + Fib retracement pullback strategy
+// Long:  HL → HH leg, entry at fib retrace, SL at HL, TP = RR × risk
+// Short: LH → LL leg, entry at fib retrace, SL at LH, TP = RR × risk
+
+function fableFindPivots(cs, N) {
+  // Parity with backend find_pivots(): high[i]==max(window) → H, elif low[i]==min → L
+  // Pivot only "exists" once bar i+N closes (confirmedAt) — no repaint.
+  const raw = [];
+  for (let i = N; i < cs.length - N; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let k = i - N; k <= i + N; k++) {
+      if (cs[k].high > hi) hi = cs[k].high;
+      if (cs[k].low  < lo) lo = cs[k].low;
+    }
+    if (cs[i].high === hi)      raw.push({idx:i, type:"H", price:cs[i].high, confirmedAt:i+N});
+    else if (cs[i].low === lo)  raw.push({idx:i, type:"L", price:cs[i].low,  confirmedAt:i+N});
+  }
+  // Enforce alternation — consecutive same-type pivots keep the more extreme
+  const out = [];
+  for (const p of raw) {
+    const last = out[out.length-1];
+    if (last && last.type === p.type) {
+      if (p.type === "H" ? p.price > last.price : p.price < last.price) out[out.length-1] = p;
+    } else out.push(p);
+  }
+  // Structure labels vs previous pivot of same type
+  let prevH = null, prevL = null;
+  for (const p of out) {
+    if (p.type === "H") { p.label = prevH === null ? "H" : (p.price > prevH ? "HH" : "LH"); prevH = p.price; }
+    else                { p.label = prevL === null ? "L" : (p.price > prevL ? "HL" : "LL"); prevL = p.price; }
+  }
+  return out;
+}
+
+function fableRunStrategy(cs, pivots, fib, rr, maxWait) {
+  // Build setups from confirmed legs:
+  //   LONG : pivot L (HL) followed by pivot H (HH)
+  //   SHORT: pivot H (LH) followed by pivot L (LL)
+  const setups = [];
+  for (let j = 1; j < pivots.length; j++) {
+    const p1 = pivots[j-1], p2 = pivots[j];
+    const confirmedAt = Math.max(p1.confirmedAt, p2.confirmedAt);
+    if (p1.type==="L" && p2.type==="H" && p1.label==="HL" && p2.label==="HH") {
+      const entry = p2.price - fib * (p2.price - p1.price);
+      const sl = p1.price, tp = entry + rr * (entry - sl);
+      if (entry > sl) setups.push({dir:"long", p1, p2, entry, sl, tp, confirmedAt});
+    }
+    if (p1.type==="H" && p2.type==="L" && p1.label==="LH" && p2.label==="LL") {
+      const entry = p2.price + fib * (p1.price - p2.price);
+      const sl = p1.price, tp = entry - rr * (sl - entry);
+      if (entry < sl) setups.push({dir:"short", p1, p2, entry, sl, tp, confirmedAt});
+    }
+  }
+  setups.sort((a,b) => a.confirmedAt - b.confirmedAt);
+
+  // Bar-by-bar simulation — closed candles only, SL-first on same-candle conflicts
+  const trades = [];
+  const armed  = {long:null, short:null};   // latest valid unfilled setup per direction
+  const open   = {long:null, short:null};   // one position per direction
+  let si = 0;
+
+  for (let i = 0; i < cs.length; i++) {
+    // 1) Newly confirmed setups re-anchor the armed zone for their direction
+    while (si < setups.length && setups[si].confirmedAt === i) {
+      const s = setups[si++];
+      armed[s.dir] = {...s};
+    }
+    const c = cs[i];
+
+    // 2) Manage open positions (SL checked before TP — conservative)
+    for (const d of ["long","short"]) {
+      const t = open[d];
+      if (!t) continue;
+      if (d === "long") {
+        if      (c.low  <= t.sl) { trades.push({...t, exitIdx:i, exitPrice:t.sl, result:"loss", r:-1});  open[d]=null; }
+        else if (c.high >= t.tp) { trades.push({...t, exitIdx:i, exitPrice:t.tp, result:"win",  r:rr});  open[d]=null; }
+      } else {
+        if      (c.high >= t.sl) { trades.push({...t, exitIdx:i, exitPrice:t.sl, result:"loss", r:-1});  open[d]=null; }
+        else if (c.low  <= t.tp) { trades.push({...t, exitIdx:i, exitPrice:t.tp, result:"win",  r:rr});  open[d]=null; }
+      }
+    }
+
+    // 3) Armed setups: expiry, invalidation, fills (only bars AFTER confirmation)
+    for (const d of ["long","short"]) {
+      const s = armed[d];
+      if (!s || i <= s.confirmedAt) continue;
+      if (maxWait > 0 && i - s.confirmedAt > maxWait) { armed[d] = null; continue; }
+      if (d === "long") {
+        if (c.close < s.sl) { armed[d] = null; continue; }           // closed below P1 → zone dead
+        if (!open[d] && c.low <= s.entry) {
+          const t = {...s, entryIdx:i};
+          if (c.low <= s.sl) trades.push({...t, exitIdx:i, exitPrice:s.sl, result:"loss", r:-1}); // swept through
+          else open[d] = t;
+          armed[d] = null;
+        }
+      } else {
+        if (c.close > s.sl) { armed[d] = null; continue; }           // closed above P1 → zone dead
+        if (!open[d] && c.high >= s.entry) {
+          const t = {...s, entryIdx:i};
+          if (c.high >= s.sl) trades.push({...t, exitIdx:i, exitPrice:s.sl, result:"loss", r:-1});
+          else open[d] = t;
+          armed[d] = null;
+        }
+      }
+    }
+  }
+  return { trades, open, armed };
+}
+
+function FableChart({candles, pivots, strat, showPivots, showLabels, zoom, offset, setOffset, strategyOn}) {
+  const wrapRef = React.useRef(null);
+  const cvsRef  = React.useRef(null);
+  const drag    = React.useRef(null);
+
+  React.useEffect(() => {
+    const cvs = cvsRef.current, wrap = wrapRef.current;
+    if (!cvs || !wrap || !candles.length) return;
+    const W = wrap.clientWidth, H = 380, dpr = window.devicePixelRatio || 1;
+    cvs.width = W*dpr; cvs.height = H*dpr;
+    cvs.style.width = W+"px"; cvs.style.height = H+"px";
+    const ctx = cvs.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,W,H);
+
+    const AXIS_R = 56, AXIS_B = 20;
+    const plotW = W - AXIS_R, plotH = H - AXIS_B;
+    const n     = candles.length;
+    const end   = Math.max(zoom, n - offset);
+    const start = Math.max(0, end - zoom);
+    const vis   = candles.slice(start, end);
+    if (!vis.length) return;
+
+    // y-range from visible candles + visible strategy levels
+    let yMin = Infinity, yMax = -Infinity;
+    vis.forEach(c => { if (c.low < yMin) yMin = c.low; if (c.high > yMax) yMax = c.high; });
+    const liveLevels = [];
+    if (strategyOn) for (const d of ["long","short"]) {
+      for (const s of [strat.armed[d], strat.open[d]]) if (s) liveLevels.push(s.entry, s.sl, s.tp);
+    }
+    liveLevels.forEach(v => { if (v < yMin) yMin = v; if (v > yMax) yMax = v; });
+    const pad = (yMax - yMin) * 0.07 || yMax * 0.01;
+    yMin -= pad; yMax += pad;
+
+    const cw = plotW / vis.length;
+    const X  = i => (i - start) * cw + cw/2;             // i = absolute candle index
+    const Y  = p => plotH - ((p - yMin) / (yMax - yMin)) * plotH;
+    const dec = yMax < 0.01 ? 6 : yMax < 1 ? 5 : yMax < 100 ? 4 : 2;
+
+    // grid + y labels
+    ctx.font = "9px 'IBM Plex Mono', monospace";
+    for (let g = 0; g <= 5; g++) {
+      const p = yMin + (yMax - yMin) * g / 5, y = Y(p);
+      ctx.strokeStyle = "#1c2433"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(plotW,y); ctx.stroke();
+      ctx.fillStyle = "#6e7681"; ctx.textAlign = "left";
+      ctx.fillText(p.toFixed(dec), plotW + 5, y + 3);
+    }
+    // x time labels
+    ctx.textAlign = "center";
+    const step = Math.max(1, Math.floor(vis.length / 5));
+    for (let k = 0; k < vis.length; k += step) {
+      const c = vis[k];
+      ctx.fillStyle = "#6e7681";
+      ctx.fillText(new Date(c.ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"}), X(start+k), H - 6);
+    }
+
+    // candles
+    const bodyW = Math.max(1, cw * 0.62);
+    vis.forEach((c, k) => {
+      const i = start + k, x = X(i), up = c.close >= c.open;
+      const col = up ? "#00ff9d" : "#ff4466";
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, Y(c.high)); ctx.lineTo(x, Y(c.low)); ctx.stroke();
+      ctx.fillStyle = up ? "#00ff9d" : "#ff4466";
+      const yO = Y(c.open), yC = Y(c.close);
+      ctx.fillRect(x - bodyW/2, Math.min(yO,yC), bodyW, Math.max(1, Math.abs(yC-yO)));
+    });
+
+    // pivots + structure labels
+    if (showPivots) {
+      ctx.font = "bold 9px 'IBM Plex Mono', monospace"; ctx.textAlign = "center";
+      pivots.forEach(p => {
+        if (p.idx < start || p.idx >= end) return;
+        const x = X(p.idx);
+        if (p.type === "H") {
+          const y = Y(p.price) - 6;
+          ctx.fillStyle = p.label === "HH" ? "#00ff9d" : "#ff4466";
+          ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-4,y-6); ctx.lineTo(x+4,y-6); ctx.closePath(); ctx.fill();
+          if (showLabels) ctx.fillText(p.label, x, y - 10);
+        } else {
+          const y = Y(p.price) + 6;
+          ctx.fillStyle = p.label === "HL" ? "#00ff9d" : "#ff4466";
+          ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-4,y+6); ctx.lineTo(x+4,y+6); ctx.closePath(); ctx.fill();
+          if (showLabels) ctx.fillText(p.label, x, y + 16);
+        }
+      });
+    }
+
+    if (strategyOn) {
+      const dash = (y, x1, x2, col) => {
+        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([4,3]);
+        ctx.beginPath(); ctx.moveTo(x1, Y(y)); ctx.lineTo(x2, Y(y)); ctx.stroke();
+        ctx.setLineDash([]);
+      };
+      // completed trades
+      strat.trades.forEach(t => {
+        if (t.exitIdx < start || t.entryIdx >= end) return;
+        const x1 = X(Math.max(t.entryIdx, start)), x2 = X(Math.min(t.exitIdx, end-1));
+        dash(t.sl, x1, x2, "#ff446688");
+        dash(t.tp, x1, x2, "#ffd66688");
+        ctx.strokeStyle = t.result === "win" ? "#00ff9d" : "#ff4466"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x1, Y(t.entry)); ctx.lineTo(x2, Y(t.exitPrice)); ctx.stroke();
+        // entry arrow
+        ctx.fillStyle = t.dir === "long" ? "#00ff9d" : "#ff4466";
+        ctx.font = "11px 'IBM Plex Mono', monospace"; ctx.textAlign = "center";
+        ctx.fillText(t.dir === "long" ? "▲" : "▼", x1, Y(t.entry) + (t.dir==="long" ? 14 : -8));
+        // outcome dot
+        ctx.beginPath(); ctx.arc(x2, Y(t.exitPrice), 3.5, 0, Math.PI*2);
+        ctx.fillStyle = t.result === "win" ? "#00ff9d" : "#ff4466"; ctx.fill();
+      });
+      // live: open positions + armed setups extend to right edge
+      const liveLine = (y, fromIdx, col, tag) => {
+        const x1 = X(Math.max(fromIdx, start));
+        dash(y, x1, plotW, col);
+        ctx.fillStyle = col; ctx.font = "bold 9px 'IBM Plex Mono', monospace"; ctx.textAlign = "left";
+        ctx.fillText(`${tag} ${y.toFixed(dec)}`, x1 + 2, Y(y) - 3);
+      };
+      for (const d of ["long","short"]) {
+        const o = strat.open[d];
+        if (o && o.entryIdx < end) {
+          liveLine(o.entry, o.entryIdx, "#3b8bff", `OPEN ${d.toUpperCase()}`);
+          liveLine(o.sl,    o.entryIdx, "#ff4466", "SL");
+          liveLine(o.tp,    o.entryIdx, "#ffd666", "TP");
+        }
+        const a = strat.armed[d];
+        if (a && a.p2.idx < end) {
+          liveLine(a.entry, a.p2.idx, "#b388ff", `FIB ${d==="long"?"LONG":"SHORT"}`);
+          liveLine(a.sl,    a.p2.idx, "#ff446699", "SL");
+          liveLine(a.tp,    a.p2.idx, "#ffd66699", "TP");
+        }
+      }
+    }
+  }, [candles, pivots, strat, showPivots, showLabels, zoom, offset, strategyOn]);
+
+  // drag to pan
+  const onDown = e => { drag.current = {x:e.clientX, off:offset}; };
+  const onMove = e => {
+    if (!drag.current) return;
+    const wrap = wrapRef.current; if (!wrap) return;
+    const cw = (wrap.clientWidth - 56) / zoom;
+    const d  = Math.round((e.clientX - drag.current.x) / cw);
+    setOffset(Math.max(0, Math.min(candles.length - zoom, drag.current.off + d)));
+  };
+  const onUp = () => { drag.current = null; };
+
+  return (
+    <div ref={wrapRef} style={{width:"100%",touchAction:"pan-y"}}>
+      <canvas ref={cvsRef}
+        onPointerDown={onDown} onPointerMove={onMove}
+        onPointerUp={onUp} onPointerLeave={onUp}
+        style={{display:"block",cursor:"grab",borderRadius:8}}/>
+    </div>
+  );
+}
+
+function FableTab() {
+  const [symbol, setSymbol]   = useState("XRP/USDT");
+  const [tf, setTf]           = useState("15m");
+  const [days, setDays]       = useState(14);
+  const [candles, setCandles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+
+  // indicator variables
+  const [pivotN, setPivotN]       = useState(5);
+  const [fibLevel, setFibLevel]   = useState(0.618);
+  const [rr, setRr]               = useState(2);
+  const [maxWait, setMaxWait]     = useState(100);
+  const [showPivots, setShowPivots] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
+
+  // strategy on/off
+  const [strategyOn, setStrategyOn] = useState(false);
+
+  // view window
+  const [zoom, setZoom]     = useState(120);
+  const [offset, setOffset] = useState(0);
+
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const endMs   = Date.now();
+      const startMs = endMs - days * 86400000;
+      const params  = new URLSearchParams({symbol, timeframe:tf, start_ms:startMs, end_ms:endMs, limit:10000});
+      const res     = await fetch(`${API}/candles?${params}`);
+      if (!res.ok) throw new Error("API error " + res.status);
+      const data    = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed — try Prefetch tab first to cache data");
+      if (!data.candles?.length) throw new Error("No cached candles for this range — run Prefetch first");
+      setCandles(data.candles);
+      setOffset(0);
+    } catch(e) { setError(e.message); setCandles([]); }
+    setLoading(false);
+  };
+
+  const pivots = useMemo(() => candles.length ? fableFindPivots(candles, pivotN) : [], [candles, pivotN]);
+  const strat  = useMemo(() =>
+    candles.length ? fableRunStrategy(candles, pivots, fibLevel, rr, maxWait)
+                   : {trades:[], open:{long:null,short:null}, armed:{long:null,short:null}},
+    [candles, pivots, fibLevel, rr, maxWait]);
+
+  const wins  = strat.trades.filter(t=>t.result==="win").length;
+  const total = strat.trades.length;
+  const netR  = strat.trades.reduce((a,t)=>a+t.r, 0);
+  const openCount  = ["long","short"].filter(d=>strat.open[d]).length;
+  const armedCount = ["long","short"].filter(d=>strat.armed[d]).length;
+
+  const card = {background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:14};
+
+  return (
+    <div>
+      {/* Data controls */}
+      <div style={{...card, marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+          <Sel label="Pair"      value={symbol} onChange={setSymbol} options={ALL_PAIRS}/>
+          <Sel label="Timeframe" value={tf}     onChange={setTf}     options={ALL_TIMEFRAMES}/>
+          <Sel label="Days"      value={days}   onChange={v=>setDays(Number(v))} options={[3,7,14,30,60,90]}/>
+        </div>
+        <button onClick={load} disabled={loading} style={{
+          width:"100%",background:loading?C.dim:C.purple,color:C.bg,border:"none",borderRadius:8,
+          padding:12,fontSize:12,fontWeight:800,cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
+        }}>{loading ? "⟳ Loading..." : "⬇ LOAD CHART"}</button>
+        {error && <div style={{marginTop:8,fontSize:10,color:C.red}}>{error}</div>}
+      </div>
+
+      {/* Indicator variables */}
+      <div style={{...card, marginBottom:12}}>
+        <div style={{fontSize:9,color:C.purple,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:10}}>
+          High / Low Indicator + Strategy Variables
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          <Sel label={`Pivot Lookback (N)`} value={pivotN}   onChange={v=>setPivotN(Number(v))}   options={[2,3,4,5,6,8,10,13]}/>
+          <Sel label="Fib Retracement"      value={fibLevel} onChange={v=>setFibLevel(Number(v))} options={[0.382,0.5,0.618,0.705,0.786]}/>
+          <Sel label="Risk : Reward"        value={rr}       onChange={v=>setRr(Number(v))}       options={[{value:1,label:"1 : 1"},{value:1.5,label:"1 : 1.5"},{value:2,label:"1 : 2"},{value:3,label:"1 : 3"}]}/>
+          <Sel label="Max Wait (bars)"      value={maxWait}  onChange={v=>setMaxWait(Number(v))}  options={[{value:50,label:"50"},{value:100,label:"100"},{value:200,label:"200"},{value:0,label:"No expiry"}]}/>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Toggle label="Pivot Markers"     value={showPivots} onChange={setShowPivots}/>
+          <Toggle label="HH·HL·LH·LL Labels" value={showLabels} onChange={setShowLabels}/>
+        </div>
+      </div>
+
+      {/* Strategy open/close button */}
+      <button onClick={()=>setStrategyOn(s=>!s)} disabled={!candles.length} style={{
+        width:"100%",marginBottom:12,
+        background:strategyOn?C.redDim:C.accentDim,
+        color:strategyOn?C.red:C.accent,
+        border:`1px solid ${strategyOn?C.red:C.accent}`,borderRadius:8,
+        padding:14,fontSize:13,fontWeight:800,letterSpacing:"0.08em",
+        cursor:candles.length?"pointer":"not-allowed",opacity:candles.length?1:0.5
+      }}>
+        {strategyOn ? "■ CLOSE STRATEGY" : "▶ OPEN STRATEGY"}
+      </button>
+
+      {/* Chart */}
+      {candles.length > 0 && (
+        <div style={{...card, marginBottom:12, padding:8}}>
+          <FableChart
+            candles={candles} pivots={pivots} strat={strat}
+            showPivots={showPivots} showLabels={showLabels}
+            zoom={Math.min(zoom, candles.length)} offset={offset} setOffset={setOffset}
+            strategyOn={strategyOn}
+          />
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 6px 2px"}}>
+            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.1em"}}>ZOOM</span>
+            <input type="range" min={40} max={Math.max(60, candles.length)} value={zoom}
+              onChange={e=>setZoom(Number(e.target.value))} style={{flex:1,accentColor:C.purple}}/>
+            <span style={{fontSize:9,color:C.muted}}>{Math.min(zoom,candles.length)} bars · drag to pan</span>
+          </div>
+        </div>
+      )}
+
+      {/* Strategy results */}
+      {strategyOn && candles.length > 0 && (
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+            <StatCard label="Trades"   value={total}/>
+            <StatCard label="Win Rate" value={total ? fmt(wins/total*100,0)+"%" : "—"} color={C.purple}/>
+            <StatCard label="Net R"    value={(netR>=0?"+":"")+fmt(netR,1)+"R"} color={netR>=0?C.accent:C.red}/>
+            <StatCard label="Live"     value={`${openCount} open · ${armedCount} armed`} color={C.blue}/>
+          </div>
+
+          {/* Active signals */}
+          {["long","short"].map(d => {
+            const a = strat.armed[d], o = strat.open[d];
+            if (!a && !o) return null;
+            const s = o || a, isOpen = !!o;
+            return (
+              <div key={d} style={{...card, marginBottom:8, borderColor:isOpen?C.blue:C.purple}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontSize:10,fontWeight:800,color:d==="long"?C.accent:C.red,letterSpacing:"0.1em"}}>
+                    {d.toUpperCase()} — {isOpen ? "POSITION OPEN" : "ARMED · waiting for pullback"}
+                  </span>
+                  <span style={{fontSize:9,color:C.muted}}>fib {fibLevel}</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,fontSize:11}}>
+                  <div><span style={{color:C.muted,fontSize:9}}>ENTRY </span><span style={{color:C.purple,fontWeight:700}}>{fmt(s.entry,5)}</span></div>
+                  <div><span style={{color:C.muted,fontSize:9}}>SL </span><span style={{color:C.red,fontWeight:700}}>{fmt(s.sl,5)}</span></div>
+                  <div><span style={{color:C.muted,fontSize:9}}>TP </span><span style={{color:C.gold,fontWeight:700}}>{fmt(s.tp,5)}</span></div>
+                </div>
+                <div style={{fontSize:9,color:C.muted,marginTop:6}}>
+                  Leg: {d==="long" ? "HL" : "LH"} {fmt(s.p1.price,5)} → {d==="long" ? "HH" : "LL"} {fmt(s.p2.price,5)}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Trade list */}
+          {total > 0 && (
+            <div style={{...card, overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead>
+                  <tr style={{color:C.muted,textAlign:"left"}}>
+                    <th style={{padding:"4px 6px"}}>#</th><th>Dir</th><th>Entry Time</th>
+                    <th>Entry</th><th>SL</th><th>TP</th><th>Result</th><th>R</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...strat.trades].reverse().map((t,k) => (
+                    <tr key={k} style={{borderTop:`1px solid ${C.border}`}}>
+                      <td style={{padding:"5px 6px",color:C.muted}}>{total-k}</td>
+                      <td style={{color:t.dir==="long"?C.accent:C.red,fontWeight:700}}>{t.dir==="long"?"▲ L":"▼ S"}</td>
+                      <td style={{color:C.muted}}>{fmtDate(candles[t.entryIdx].ts)}</td>
+                      <td>{fmt(t.entry,5)}</td>
+                      <td style={{color:C.red}}>{fmt(t.sl,5)}</td>
+                      <td style={{color:C.gold}}>{fmt(t.tp,5)}</td>
+                      <td style={{color:t.result==="win"?C.accent:C.red,fontWeight:700}}>{t.result==="win"?"WIN":"LOSS"}</td>
+                      <td style={{color:t.r>=0?C.accent:C.red,fontWeight:700}}>{t.r>=0?"+":""}{fmt(t.r,1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!candles.length && !loading && (
+        <div style={{...card, textAlign:"center", color:C.muted, fontSize:11, padding:30}}>
+          Load a chart to see pivot structure (HH · HL · LH · LL).<br/>
+          Then open the strategy to overlay fib {fibLevel} pullback trades.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App() {
   const [mainTab, setMainTab] = useState("single");
@@ -2028,6 +2487,7 @@ function App() {
     ["prefetch", "Prefetch", C.gold],
     ["journal",  "Paper",    C.blue],
     ["live",     "Live",     C.red],
+    ["fable",    "Fable",    C.purple],
   ];
 
   return (
@@ -2064,6 +2524,7 @@ function App() {
       {mainTab==="runner"   && <MatrixRunnerTab/>}
       {mainTab==="journal"  && <JournalTab/>}
       {mainTab==="live"     && <LiveJournalTab/>}
+      {mainTab==="fable"    && <FableTab/>}
     </div>
   );
 }
