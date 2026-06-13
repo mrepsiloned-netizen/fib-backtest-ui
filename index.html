@@ -179,8 +179,7 @@ function ChipRow({label,options,selected,onSelect,color}) {
 
 function EngineChips({value,onChange}) {
   const engines = [
-    {value:"structure",  label:"BOS Pullback",  desc:"P1P2P3 v6.5 aligned"},
-    {value:"ema_cross",  label:"EMA Cross",     desc:"Engine 6 — cross filter matrix"},
+    {value:"pullback",  label:"BOS Pullback",    desc:"P1P2P3 v6.5 aligned"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -245,11 +244,6 @@ function SingleTab() {
   const [showAdv,   setShowAdv]   = useState(false);
   const [emaPair,   setEmaPair]   = useState("off");   // "off" | "13/21" | "34/55" etc
   const [adxMin,    setAdxMin]    = useState(0);       // 0=off, 10/15/20/25/30
-  // EMA Cross engine filters
-  const [ecRsi,     setEcRsi]     = useState(false);
-  const [ecVol,     setEcVol]     = useState(false);
-  const [ecGap,     setEcGap]     = useState(false);
-  const [ecHtf,     setEcHtf]     = useState(false);
   const [status,    setStatus]    = useState("idle");
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");
@@ -288,9 +282,7 @@ function SingleTab() {
           use_ema_filter:parseEma(emaPair).use,
           ema_fast:parseEma(emaPair).fast,
           ema_slow:parseEma(emaPair).slow,
-          adx_period:14, adx_threshold:adxMin,
-          ema_cross_rsi:ecRsi, ema_cross_volume:ecVol,
-          ema_cross_gap:ecGap, ema_cross_htf:ecHtf,
+          adx_period:14, adx_threshold:adxMin
         })
       });
       setPhase("Processing results...");
@@ -304,7 +296,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin,bosBreak,ecRsi,ecVol,ecGap,ecHtf]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin,bosBreak]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -406,32 +398,6 @@ function SingleTab() {
             ))}
           </div>
         </div>
-
-        {/* EMA Cross engine filters — only shown when engine=ema_cross */}
-        {engine==="ema_cross" && (
-          <div style={{marginBottom:14}}>
-            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
-              EMA Cross Filters
-            </span>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[
-                ["RSI > 50",      ecRsi,  setEcRsi,  "Momentum confirm"],
-                ["Volume spike",  ecVol,  setEcVol,  "Real participation"],
-                ["EMA gap 0.05%", ecGap,  setEcGap,  "No choppy cross"],
-                ["HTF ×5 trend",  ecHtf,  setEcHtf,  "Higher TF agrees"],
-              ].map(([label,val,setter,desc])=>(
-                <div key={label} onClick={()=>setter(!val)} style={{
-                  background:val?C.accentDim:C.card,
-                  border:`1px solid ${val?C.accent:C.border}`,
-                  borderRadius:8,padding:"10px 8px",cursor:"pointer"
-                }}>
-                  <div style={{fontSize:11,fontWeight:700,color:val?C.accent:C.text,marginBottom:2}}>{label}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{val?"ON — ":""}{desc}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Advanced */}
         <div onClick={()=>setShowAdv(!showAdv)} style={{
@@ -1836,33 +1802,7 @@ function MatrixRunnerTab() {
   const [loading,   setLoading]   = React.useState(false);
   const [csvData,   setCsvData]   = React.useState("");
   const [polling,   setPolling]   = React.useState(false);
-  const [filters,   setFilters]   = React.useState({min_return:0,min_sharpe:1,min_trades:30,max_dd:50,engine:""});
-  const [varTab,    setVarTab]    = React.useState("bos");
-
-  const BOS_VARS = [
-    ["Pairs",      ["DOGE","XLM","XRP","ADA","TRX","ARB"]],
-    ["Timeframe",  ["5m","15m","1h"]],
-    ["Entry",      ["Rejection","Reclaim"]],
-    ["Pivot N",    ["3","5","8"]],
-    ["R:R",        ["1.5R","2R","3R","4R"]],
-    ["Fib",        ["0.382","0.5","0.618"]],
-    ["EMA Filter", ["Off","34/55","55/89","89/144","144/169"]],
-    ["ADX Min",    ["Off","15","25"]],
-  ];
-  const BOS_TOTAL = 6*3*2*3*4*3*5*3; // 19,440
-
-  const EMA_VARS = [
-    ["Pairs",         ["DOGE","XLM","XRP","TRX","ARB"]],
-    ["Timeframe",     ["1m","5m","15m"]],
-    ["EMA Fast",      ["9","12"]],
-    ["EMA Slow",      ["21","26"]],
-    ["R:R",           ["1.5R","2R"]],
-    ["RSI Filter",    ["Off","On"]],
-    ["Volume Filter", ["Off","On"]],
-    ["EMA Gap Filter",["Off","On"]],
-    ["HTF Mult ×5",   ["Off","On"]],
-  ];
-  const EMA_TOTAL = 5*3*2*2*2*2*2*2*2; // 1,920 (valid pairs only ~960)
+  const [filters,   setFilters]   = React.useState({min_return:0,min_sharpe:1,min_trades:30,max_dd:50});
 
   const fetchStatus = async () => {
     try {
@@ -1878,6 +1818,16 @@ function MatrixRunnerTab() {
     const iv = setInterval(fetchStatus, 5000);
     return () => clearInterval(iv);
   }, [polling]);
+
+  const resetStatus = async () => {
+    try {
+      // Force-update matrix_status to idle via the API
+      await fetch(`${API}/matrix-status/reset`, {method:"POST"});
+    } catch(e) {}
+    // Also force local state to unblocked
+    setStatus(s => s ? {...s, status:"idle", is_running:false} : {status:"idle",is_running:false});
+    setStartMsg("Status reset — ready to run.");
+  };
 
   const startPrefetch = async () => {
     setPrefetching(true); setStartMsg("");
@@ -1909,53 +1859,101 @@ function MatrixRunnerTab() {
         min_sharpe: filters.min_sharpe,
         min_trades: filters.min_trades,
         max_dd:     filters.max_dd,
-        ...(filters.engine ? {engine: filters.engine} : {}),
       });
       const res = await fetch(`${API}/matrix-results/export?${params}`);
       if (!res.ok) { setLoading(false); return; }
-      const blob = await res.blob();
+      // Streaming response — get raw CSV text
+      const csv  = await res.text();
+      setCsvData(csv);
+      const blob = new Blob([csv], {type:"text/csv"});
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
-      a.href=url; a.download="waddle_matrix.csv"; a.click();
+      a.href     = url;
+      a.download = `waddle_matrix_${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
       URL.revokeObjectURL(url);
-      setCsvData("downloaded");
-    } catch(e) { setCsvData("Error: "+e.message); }
+    } catch(e) { console.error(e); }
     setLoading(false);
   };
 
-  const isRunning = status?.status === "running";
-  const phase     = status?.phase  || "";
-  const pct       = status?.total  ? (status.completed/status.total*100).toFixed(1) : 0;
+  const phase     = status?.phase || "";
+  const isRunning = status?.is_running === true && status?.status === "running";
+  const isDone    = status?.status === "done" && !isRunning;
+  const pct       = status?.total > 0 ? Math.round((status.completed||0)/status.total*100) : 0;
+
+  const VARS = [
+    ["Pairs",      ["DOGE","XLM","XRP","ADA","TRX","ARB"]],
+    ["Timeframes", ["5m","15m","1h"]],
+    ["Engines",    ["BOS Pullback"]],
+    ["Entry Modes",["Rejection","Reclaim"]],
+    ["Pivot N",    [3,5,8]],
+    ["RR Ratios",  [1.5,2.0,3.0,4.0]],
+    ["Fib Levels", [0.382,0.5,0.618]],
+    ["EMA Pairs",  ["Off","34/55","55/89","89/144","144/169"]],
+    ["ADX Min",    ["Off(0)",15,25]],
+
+  ];
 
   return (
     <div>
-      {/* Status */}
-      {status && (
-        <div style={{background:isRunning?C.accentDim:C.surface,border:`1px solid ${isRunning?C.accent:C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-              {isRunning ? `⟳ Running — ${phase}` : status.status==="done" ? "✓ Complete" : "Idle"}
-            </span>
-            <span style={{fontSize:11,color:C.accent,fontWeight:700}}>{pct}%</span>
-          </div>
-          {isRunning && (
-            <>
-              <ProgressBar value={status.completed||0} total={status.total||1}/>
-              <div style={{fontSize:10,color:C.muted,marginTop:6}}>{(status.completed||0).toLocaleString()} / {(status.total||0).toLocaleString()} combos · {status.detail||""}</div>
-            </>
-          )}
-          {status.status==="done" && (
-            <div style={{fontSize:11,color:C.accent,marginTop:4}}>✓ Matrix complete — download CSV below</div>
-          )}
+      {/* Status card */}
+      <div style={{background:C.surface,border:`1px solid ${isDone?C.accent:isRunning?C.gold:C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <div style={{width:8,height:8,borderRadius:"50%",
+            background:isDone?C.accent:isRunning?C.gold:C.muted,
+            boxShadow:isRunning?`0 0 8px ${C.gold}`:isDone?`0 0 8px ${C.accent}`:"none"}}/>
+          <span style={{fontSize:10,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700,
+            color:isDone?C.accent:isRunning?C.gold:C.muted}}>
+            {isDone?"Complete":isRunning?`Running — ${phase==="prefetch"?"Fetching Candles":"Computing"}`:
+             status?.status==="not_started"?"Not Started":"Idle"}
+          </span>
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button onClick={async()=>{
+            try{await fetch(`${API}/matrix-status/reset`,{method:"POST"});}catch(e){}
+            // Force local state to unblocked regardless of API response
+            setStatus(s => ({...(s||{}), status:"idle", is_running:false}));
+            setStartMsg("✓ Reset — buttons unlocked");
+            fetchStatus();
+          }} style={{background:C.redDim,border:`1px solid ${C.red}`,borderRadius:4,
+            padding:"3px 8px",color:C.red,fontSize:10,cursor:"pointer",fontWeight:700}}>🗑 FORCE RESET</button>
+          <button onClick={fetchStatus} style={{background:"transparent",
+            border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",
+            color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
         </div>
-      )}
+        </div>
 
-      {startMsg && (
-        <div style={{background:C.accentDim,border:`1px solid ${C.accent}`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:C.accent}}>{startMsg}</div>
-      )}
+        {status && status.total > 0 && (
+          <div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+              <StatCard label="Done"    value={(status.completed||0).toLocaleString()} color={C.accent}/>
+              <StatCard label="Total"   value={(status.total||0).toLocaleString()}/>
+              <StatCard label="Progress" value={`${pct}%`} color={isDone?C.accent:C.gold}/>
+            </div>
+            <div style={{background:C.dim,borderRadius:4,height:8,marginBottom:8}}>
+              <div style={{background:isDone?C.accent:C.gold,height:8,borderRadius:4,
+                width:`${pct}%`,transition:"width 1s"}}/>
+            </div>
+            {status.detail && (
+              <div style={{fontSize:10,color:C.muted}}>
+                {phase==="prefetch"?"📥 Fetching:":"🔢 Computing:"} {status.detail}
+              </div>
+            )}
+          </div>
+        )}
+
+        {startMsg && <div style={{marginTop:10,fontSize:11,color:C.accent}}>{startMsg}</div>}
+
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button onClick={()=>setPolling(!polling)} style={{
+            flex:1,background:polling?C.goldDim:C.card,color:polling?C.gold:C.muted,
+            border:`1px solid ${polling?C.gold:C.border}`,borderRadius:6,
+            padding:"8px 12px",fontSize:10,cursor:"pointer"
+          }}>{polling?"⏸ Stop Refresh":"▶ Auto Refresh (5s)"}</button>
+        </div>
+      </div>
 
       {/* Action buttons */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
         <button onClick={startPrefetch} disabled={prefetching||isRunning} style={{
           background:prefetching||isRunning?C.dim:C.gold,color:C.bg,border:"none",
           borderRadius:8,padding:12,fontSize:11,fontWeight:800,
@@ -1968,26 +1966,18 @@ function MatrixRunnerTab() {
         }}>{starting?"⟳ Starting...":isRunning&&phase==="compute"?"⟳ Running...":"▶ RUN COMPUTATION"}</button>
       </div>
 
-      {/* Variable space — tabbed by engine */}
+      {/* Variable space */}
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>Variables Being Tested</div>
-          <div style={{display:"flex",gap:6}}>
-            {[["bos","BOS Pullback",`${BOS_TOTAL.toLocaleString()}`],["ema","EMA Cross",`~${EMA_TOTAL.toLocaleString()}`]].map(([id,label,count])=>(
-              <div key={id} onClick={()=>setVarTab(id)} style={{
-                background:varTab===id?C.accentDim:C.card,
-                border:`1px solid ${varTab===id?C.accent:C.border}`,
-                borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:10,
-                color:varTab===id?C.accent:C.muted
-              }}>{label} <span style={{color:varTab===id?C.accent:C.muted,fontWeight:700}}>{count}</span></div>
-            ))}
-          </div>
+        <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
+          Variables Being Tested
+          <span style={{marginLeft:8,color:C.accent,fontSize:11,fontWeight:700}}>
+            19,440 combos
+          </span>
         </div>
-
-        {(varTab==="bos" ? BOS_VARS : EMA_VARS).map(([label,vals])=>(
+        {VARS.map(([label,vals])=>(
           <div key={label} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,
             paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>
-            <div style={{fontSize:9,color:C.muted,width:90,flexShrink:0,paddingTop:3,
+            <div style={{fontSize:9,color:C.muted,width:80,flexShrink:0,paddingTop:3,
               textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
               {vals.map(v=>(
@@ -1999,7 +1989,6 @@ function MatrixRunnerTab() {
         ))}
         <div style={{marginTop:8,fontSize:10,color:C.muted}}>
           Period: 2025-01-01 → 2026-01-01 · Risk: Fixed 2% · Fees: Bybit notional
-          {varTab==="ema" && " · SL: 3-bar swing · Entry: next open"}
         </div>
       </div>
 
@@ -2008,22 +1997,6 @@ function MatrixRunnerTab() {
         <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
           Filter & Download CSV
         </div>
-
-        {/* Engine filter */}
-        <div style={{marginBottom:12}}>
-          <div style={{fontSize:9,color:C.muted,marginBottom:6,textTransform:"uppercase"}}>Engine</div>
-          <div style={{display:"flex",gap:6}}>
-            {[["","All"],["bos_pullback","BOS Pullback"],["ema_cross","EMA Cross"]].map(([v,l])=>(
-              <div key={v} onClick={()=>setFilters({...filters,engine:v})} style={{
-                background:filters.engine===v?C.accentDim:C.card,
-                border:`1px solid ${filters.engine===v?C.accent:C.border}`,
-                borderRadius:4,padding:"4px 10px",cursor:"pointer",
-                fontSize:10,color:filters.engine===v?C.accent:C.text
-              }}>{l}</div>
-            ))}
-          </div>
-        </div>
-
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
           {[
             ["Min Return %","min_return",[0,10,20,50,100]],
@@ -2073,15 +2046,13 @@ function MatrixRunnerTab() {
         </div>
         {csvData && (
           <div style={{marginTop:8,fontSize:10,color:C.accent,textAlign:"center"}}>
-            {csvData.startsWith("✓") ? csvData : `✓ ${csvData} — check downloads`}
+            ✓ Downloaded — check your downloads folder
           </div>
         )}
       </div>
     </div>
   );
 }
-// ── FABLE TAB ──────────────────────────────────────────────────
-// Pivot H/L structure indicator + Fib retracement pullback strategy
 
 // ── FABLE TAB ──────────────────────────────────────────────────
 // Pivot H/L structure indicator + Fib retracement pullback strategy
@@ -2104,10 +2075,10 @@ function App() {
       <div style={{marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v12</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v11</span>
         </div>
         <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · EMA Cross · 1M · 5M · 15M · 1H</p>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · Rejection · Reclaim · 15M · 1H</p>
       </div>
 
       {/* Scrollable tab bar */}
