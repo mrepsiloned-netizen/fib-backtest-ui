@@ -1881,7 +1881,7 @@ function MatrixRunnerTab() {
     ["Fib Levels", [0.382,0.5,0.618]],
     ["EMA Pairs",  ["Off","34/55","55/89","89/144","144/169"]],
     ["ADX Min",    ["Off(0)",15,25]],
-    ["ATR SL",     ["P2","1 ATR","1.5 ATR","2 ATR","2.5 ATR","3 ATR"]],
+
   ];
 
   return (
@@ -1897,9 +1897,16 @@ function MatrixRunnerTab() {
             {isDone?"Complete":isRunning?`Running — ${phase==="prefetch"?"Fetching Candles":"Computing"}`:
              status?.status==="not_started"?"Not Started":"Idle"}
           </span>
-          <button onClick={fetchStatus} style={{marginLeft:"auto",background:"transparent",
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button onClick={async()=>{
+            try{await fetch(`${API}/matrix-status/reset`,{method:"POST"});}catch(e){}
+            fetchStatus();
+          }} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,
+            padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>🗑 Reset</button>
+          <button onClick={fetchStatus} style={{background:"transparent",
             border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",
             color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
+        </div>
         </div>
 
         {status && status.total > 0 && (
