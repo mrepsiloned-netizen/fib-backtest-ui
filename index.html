@@ -2011,44 +2011,18 @@ function MatrixRunnerTab() {
             cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
           }}>{loading?"⟳ Loading...":"⬇ FILTERED CSV"}</button>
           <button onClick={async()=>{
-            setLoading(true); setCsvData("");
+            setLoading(true); setCsvData("Sending to Telegram...");
             try {
-              // Step 1 — get Supabase credentials from API
-              const cfg = await fetch(`${API}/supabase-config`).then(r=>r.json());
-              const SURL = cfg.url; const SKEY = cfg.key;
-              const fields = "pair,timeframe,engine,entry_mode,pivot_n,rr,fib_level,ema_pair,adx_min,return_pct,cagr,max_dd,sharpe,profit_factor,win_rate,trades,wins,losses,avg_win,avg_loss,kelly_full,period_start,period_end";
-              // Step 2 — paginate Supabase directly (no Railway timeout)
-              let all=[]; let offset=0; const batch=1000;
-              while(true){
-                const res=await fetch(
-                  `${SURL}/rest/v1/matrix_results?select=${fields}&order=sharpe.desc.nullslast&limit=${batch}&offset=${offset}`,
-                  {headers:{"apikey":SKEY,"Authorization":`Bearer ${SKEY}`,"Prefer":"count=none"}}
-                );
-                const rows=await res.json();
-                if(!Array.isArray(rows)||!rows.length) break;
-                all=[...all,...rows];
-                setCsvData(`Fetching... ${all.length} rows`);
-                if(rows.length<batch) break;
-                offset+=batch;
-              }
-              // Step 3 — build and download CSV
-              const hdrs=fields.split(",");
-              const lines=[hdrs.join(","),...all.map(r=>hdrs.map(h=>(r[h]??'')).join(","))];
-              const blob=new Blob([lines.join("
-")],{type:"text/csv"});
-              const url=URL.createObjectURL(blob);
-              const a=document.createElement("a");
-              a.href=url;
-              a.download=`waddle_matrix_${new Date().toISOString().split("T")[0]}.csv`;
-              a.click(); URL.revokeObjectURL(url);
-              setCsvData(`✓ Downloaded ${all.length} rows`);
-            } catch(e){console.error(e); setCsvData("Error: "+e.message);}
+              const res = await fetch(`${API}/send-matrix-csv`,{method:"POST"});
+              const data = await res.json();
+              setCsvData(data.success ? `✓ Sent ${data.rows} rows to Telegram` : `Error: ${data.error}`);
+            } catch(e){ setCsvData("Error: "+e.message); }
             setLoading(false);
           }} disabled={loading} style={{
             background:loading?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
             padding:12,fontSize:12,fontWeight:800,
             cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
-          }}>{loading?"⟳ Fetching...":"⬇ ALL RESULTS"}</button>
+          }}>{loading?"⟳ Sending...":"📨 SEND TO TELEGRAM"}</button>
         </div>
         {csvData && (
           <div style={{marginTop:8,fontSize:10,color:C.accent,textAlign:"center"}}>
