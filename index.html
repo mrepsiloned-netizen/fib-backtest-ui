@@ -179,7 +179,7 @@ function ChipRow({label,options,selected,onSelect,color}) {
 
 function EngineChips({value,onChange}) {
   const engines = [
-    {value:"pullback",  label:"BOS Pullback",    desc:"BOS→keeps rebasing"},
+    {value:"pullback",  label:"BOS Pullback",    desc:"P1P2P3 v6.5 aligned"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -203,7 +203,8 @@ function EngineChips({value,onChange}) {
 function EntryChips({value,onChange}) {
   const modes = [
     {value:"touch",     label:"Touch",     desc:"Fib hit = fill"},
-    {value:"rejection", label:"Rejection", desc:"Wick + close back"},
+    {value:"rejection", label:"Rejection", desc:"Wick + close + green"},
+    {value:"reclaim",   label:"Reclaim",   desc:"Lose fib, win it back"},
   ];
   return (
     <div style={{marginBottom:14}}>
@@ -238,7 +239,6 @@ function SingleTab() {
   const [kStale,    setKStale]    = useState(0);
   const [entryMode, setEntryMode] = useState("rejection");
   const [bosBreak,  setBosBreak]  = useState("close");   // close | wick
-  const [timeoutMd, setTimeoutMd] = useState("always");  // always | profit_only | off
   const [atrSl,     setAtrSl]     = useState("p2");
   const [engine,    setEngine]    = useState("structure");
   const [showAdv,   setShowAdv]   = useState(false);
@@ -278,7 +278,7 @@ function SingleTab() {
           pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
           min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
           entry_mode:entryMode, engine, atr_sl:atrSl,
-          bos_break:bosBreak, timeout_mode:timeoutMd,
+          bos_break:bosBreak,
           use_ema_filter:parseEma(emaPair).use,
           ema_fast:parseEma(emaPair).fast,
           ema_slow:parseEma(emaPair).slow,
@@ -296,7 +296,7 @@ function SingleTab() {
       clearInterval(timer);
       clearTimeout(timeout);
     }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin,bosBreak,timeoutMd]);
+  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin,bosBreak]);
 
   const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
 
@@ -334,7 +334,7 @@ function SingleTab() {
         <EntryChips  value={entryMode} onChange={setEntryMode}/>
 
         {/* BOS confirmation + timeout behavior (v8 engine) */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:14}}>
           <div>
             <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>BOS Confirm</span>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
@@ -345,20 +345,6 @@ function SingleTab() {
                   borderRadius:8,padding:"8px 6px",cursor:"pointer",textAlign:"center"
                 }}>
                   <div style={{fontSize:11,color:bosBreak===v?C.accent:C.text,fontWeight:bosBreak===v?700:400}}>{l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Time Exit</span>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-              {[["always","Sym"],["profit_only","Profit"],["off","Off"]].map(([v,l])=>(
-                <div key={v} onClick={()=>setTimeoutMd(v)} style={{
-                  background:timeoutMd===v?C.accentDim:C.surface,
-                  border:`1px solid ${timeoutMd===v?C.accent:C.border}`,
-                  borderRadius:8,padding:"8px 6px",cursor:"pointer",textAlign:"center"
-                }}>
-                  <div style={{fontSize:11,color:timeoutMd===v?C.accent:C.text,fontWeight:timeoutMd===v?700:400}}>{l}</div>
                 </div>
               ))}
             </div>
