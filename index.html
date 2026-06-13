@@ -45,8 +45,8 @@ const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
 const ALL_PIVOTS     = [3,5,8];
 const ALL_RR         = [1.5,2,3,4];
 const ALL_FIBS       = [0.382, 0.5, 0.618];
-const ALL_ENGINES    = ["original","bos_pivot","structure","pullback","ema_cross"];
-const ALL_ENTRY      = ["touch","rejection"];
+const ALL_ENGINES    = ["structure"];
+const ALL_ENTRY      = ["rejection","reclaim"];
 const EMA_PAIRS = ["off","13/21","21/34","34/55","55/89","89/144","144/169"];
 const ADX_OPTS  = [0,10,15,20,25,30];
 const ATR_SL_OPTS = [
@@ -236,11 +236,11 @@ function SingleTab() {
   const [minSwing,  setMinSwing]  = useState(0.002);
   const [stopBuf,   setStopBuf]   = useState(0.001);
   const [kStale,    setKStale]    = useState(0);
-  const [entryMode, setEntryMode] = useState("touch");
+  const [entryMode, setEntryMode] = useState("rejection");
   const [bosBreak,  setBosBreak]  = useState("close");   // close | wick
   const [timeoutMd, setTimeoutMd] = useState("always");  // always | profit_only | off
   const [atrSl,     setAtrSl]     = useState("p2");
-  const [engine,    setEngine]    = useState("pullback");
+  const [engine,    setEngine]    = useState("structure");
   const [showAdv,   setShowAdv]   = useState(false);
   const [emaPair,   setEmaPair]   = useState("off");   // "off" | "13/21" | "34/55" etc
   const [adxMin,    setAdxMin]    = useState(0);       // 0=off, 10/15/20/25/30
@@ -1889,7 +1889,7 @@ function MatrixRunnerTab() {
     ["Pairs",      ["DOGE","XLM","XRP","ADA","TRX","ARB"]],
     ["Timeframes", ["5m","15m","1h"]],
     ["Engines",    ["BOS Pullback"]],
-    ["Entry Modes",["Touch","Rejection"]],
+    ["Entry Modes",["Rejection","Reclaim"]],
     ["Pivot N",    [3,5,8]],
     ["RR Ratios",  [1.5,2.0,3.0,4.0]],
     ["Fib Levels", [0.382,0.5,0.618]],
@@ -1965,7 +1965,7 @@ function MatrixRunnerTab() {
         <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
           Variables Being Tested
           <span style={{marginLeft:8,color:C.accent,fontSize:11,fontWeight:700}}>
-            116,640 combos
+            19,440 combos
           </span>
         </div>
         {VARS.map(([label,vals])=>(
@@ -2576,10 +2576,10 @@ function App() {
       <div style={{marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v9</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v11</span>
         </div>
         <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · 2-Pivot Pullback · 1M · 15M · 1H</p>
+        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · Rejection · Reclaim · 15M · 1H</p>
       </div>
 
       {/* Scrollable tab bar */}
