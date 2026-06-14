@@ -1800,7 +1800,9 @@ function MatrixRunnerTab() {
   const [prefetching,setPrefetching]=React.useState(false);
   const [startMsg,  setStartMsg]  = React.useState("");
   const [loading,   setLoading]   = React.useState(false);
+  const [tgLoading, setTgLoading] = React.useState(false);
   const [csvData,   setCsvData]   = React.useState("");
+  const [tgMsg,     setTgMsg]     = React.useState("");
   const [polling,   setPolling]   = React.useState(false);
   const [filters,   setFilters]   = React.useState({min_return:0,min_sharpe:1,min_trades:30,max_dd:50});
 
@@ -1818,16 +1820,6 @@ function MatrixRunnerTab() {
     const iv = setInterval(fetchStatus, 5000);
     return () => clearInterval(iv);
   }, [polling]);
-
-  const resetStatus = async () => {
-    try {
-      // Force-update matrix_status to idle via the API
-      await fetch(`${API}/matrix-status/reset`, {method:"POST"});
-    } catch(e) {}
-    // Also force local state to unblocked
-    setStatus(s => s ? {...s, status:"idle", is_running:false} : {status:"idle",is_running:false});
-    setStartMsg("Status reset — ready to run.");
-  };
 
   const startPrefetch = async () => {
     setPrefetching(true); setStartMsg("");
@@ -1877,7 +1869,7 @@ function MatrixRunnerTab() {
   };
 
   const phase     = status?.phase || "";
-  const isRunning = status?.is_running === true && status?.status === "running";
+  const isRunning = status?.is_running || false;
   const isDone    = status?.status === "done" && !isRunning;
   const pct       = status?.total > 0 ? Math.round((status.completed||0)/status.total*100) : 0;
 
@@ -1910,12 +1902,9 @@ function MatrixRunnerTab() {
           <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button onClick={async()=>{
             try{await fetch(`${API}/matrix-status/reset`,{method:"POST"});}catch(e){}
-            // Force local state to unblocked regardless of API response
-            setStatus(s => ({...(s||{}), status:"idle", is_running:false}));
-            setStartMsg("✓ Reset — buttons unlocked");
             fetchStatus();
-          }} style={{background:C.redDim,border:`1px solid ${C.red}`,borderRadius:4,
-            padding:"3px 8px",color:C.red,fontSize:10,cursor:"pointer",fontWeight:700}}>🗑 FORCE RESET</button>
+          }} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,
+            padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>🗑 Reset</button>
           <button onClick={fetchStatus} style={{background:"transparent",
             border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",
             color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
@@ -2031,22 +2020,27 @@ function MatrixRunnerTab() {
             cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
           }}>{loading?"⟳ Loading...":"⬇ FILTERED CSV"}</button>
           <button onClick={async()=>{
-            setLoading(true); setCsvData("Sending to Telegram...");
+            setTgLoading(true); setTgMsg("Sending to Telegram...");
             try {
               const res = await fetch(`${API}/send-matrix-csv`,{method:"POST"});
               const data = await res.json();
-              setCsvData(data.success ? `✓ Sent ${data.rows} rows to Telegram` : `Error: ${data.error}`);
-            } catch(e){ setCsvData("Error: "+e.message); }
-            setLoading(false);
-          }} disabled={loading} style={{
-            background:loading?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
+              setTgMsg(data.success ? `✓ Sent ${data.rows} rows to Telegram` : `Error: ${data.error}`);
+            } catch(e){ setTgMsg("Error: "+e.message); }
+            setTgLoading(false);
+          }} disabled={tgLoading} style={{
+            background:tgLoading?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
             padding:12,fontSize:12,fontWeight:800,
-            cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
-          }}>{loading?"⟳ Sending...":"📨 SEND TO TELEGRAM"}</button>
+            cursor:tgLoading?"not-allowed":"pointer",letterSpacing:"0.06em"
+          }}>{tgLoading?"⟳ Sending...":"📨 SEND TO TELEGRAM"}</button>
         </div>
         {csvData && (
           <div style={{marginTop:8,fontSize:10,color:C.accent,textAlign:"center"}}>
             ✓ Downloaded — check your downloads folder
+          </div>
+        )}
+        {tgMsg && (
+          <div style={{marginTop:8,fontSize:10,color:tgMsg.startsWith("Error")?C.red:C.accent,textAlign:"center"}}>
+            {tgMsg}
           </div>
         )}
       </div>
