@@ -6,7 +6,7 @@
 <title>Waddle Fib Engine v2.0</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
@@ -16,7 +16,15 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script>
+  window.addEventListener('error', function(e) {
+    document.getElementById('root').innerHTML =
+      '<div style="padding:20px;color:#ff4466;font-family:monospace;font-size:12px;white-space:pre-wrap;">' +
+      '⚠️ JS ERROR\n\n' + (e.message||'') + '\n\nFile: ' + (e.filename||'') + '\nLine: ' + (e.lineno||'') +
+      '</div>';
+  });
+</script>
+<script type="text/babel" data-presets="react" data-type="text/javascript">
 
 const API = "https://web-production-85d80.up.railway.app";
 
