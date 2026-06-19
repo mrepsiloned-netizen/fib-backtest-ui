@@ -3,31 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Backtest Lab</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.5.0/Recharts.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+<title>Waddle Fib Engine v2.0</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #07090f; color: #e6edf3; font-family: 'IBM Plex Mono', monospace; min-height: 100vh; }
-select { appearance: none; -webkit-appearance: none; width: 100%; }
-button { font-family: 'IBM Plex Mono', monospace; }
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: #0d1117; }
-::-webkit-scrollbar-thumb { background: #1c2433; border-radius: 2px; }
-.sortable { cursor: pointer; user-select: none; }
-.sortable:hover { color: #00ff9d !important; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+  ::-webkit-scrollbar { height:4px; width:4px; }
+  ::-webkit-scrollbar-thumb { background:#1c2433; border-radius:2px; }
 </style>
 </head>
 <body>
-<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#00ff9d;font-family:monospace;">Loading...</div></div>
+<div id="root"></div>
 <script type="text/babel">
-
-const { useState, useCallback, useMemo, useEffect } = React;
-const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, BarChart, Bar } = Recharts;
 
 const API = "https://web-production-85d80.up.railway.app";
 
@@ -36,2068 +25,243 @@ const C = {
   accent:"#00ff9d", accentDim:"#00ff9d15", red:"#ff4466", redDim:"#ff446615",
   gold:"#ffd666", goldDim:"#ffd66615", blue:"#3b8bff", blueDim:"#3b8bff15",
   text:"#e6edf3", muted:"#6e7681", dim:"#21262d",
-  purple:"#b388ff", purpleDim:"#b388ff15",
 };
 
-const ALL_PAIRS      = ["XRP/USDT","DOGE/USDT","TRX/USDT","XLM/USDT","ADA/USDT","ARB/USDT"];
-const ALL_TIMEFRAMES = ["1m","5m","15m","1h","4h","1d"];
-const ALL_RISKS      = ["fixed","half_kelly","full_kelly"];
-const ALL_PIVOTS     = [3,5,8];
-const ALL_RR         = [1.5,2,3,4];
-const ALL_FIBS       = [0.382, 0.5, 0.618];
-const ALL_ENGINES    = ["structure"];
-const ALL_ENTRY      = ["rejection","reclaim"];
-const EMA_PAIRS = ["off","13/21","21/34","34/55","55/89","89/144","144/169"];
-const ADX_OPTS  = [0,10,15,20,25,30];
-const ATR_SL_OPTS = [
-  {value:"p2",   label:"P2",     desc:"Structure SL"},
-  {value:"1atr",  label:"1 ATR",  desc:"Tight"},
-  {value:"1.5atr",label:"1.5 ATR",desc:"Balanced"},
-  {value:"2atr",  label:"2 ATR",  desc:"Standard"},
-  {value:"2.5atr",label:"2.5 ATR",desc:"Wide"},
-  {value:"3atr",  label:"3 ATR",  desc:"Max room"},
-];
-function parseEma(pair) {
-  if (!pair || pair==="off") return {use:false, fast:34, slow:55};
-  const [f,s] = pair.split("/").map(Number);
-  return {use:true, fast:f, slow:s};
-}
-
-const PERIODS = [
-  { label:"Last 7 Days",  start:null, end:"now", days:7 },
-  { label:"Last 30 Days", start:null, end:"now", days:30 },
-  { label:"Last 90 Days", start:null, end:"now", days:90 },
-  { label:"2025 Full",    start:"2025-01-01", end:"2026-01-01", days:365 },
-  { label:"2026 YTD",     start:"2026-01-01", end:"now", days:null },
-  { label:"Rolling 1Y",   start:null, end:"now", days:365 },
-];
-
-const RISK_LABELS = { fixed:"Fixed 2%", half_kelly:"Half Kelly", full_kelly:"Full Kelly" };
-
-const fmt     = (n,d=2) => Number(n).toFixed(d);
-const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"});
-const fmtDT   = (s)  => s ? new Date(s).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
-const fmtRisk = (r)  => RISK_LABELS[r] || r;
-
-function getPeriodDates(p) {
-  if (!p) return { start:"2025-01-01", end:"2026-01-01" };
-  const now = new Date();
-  // Rolling periods — always compute fresh from today
-  if (p.days && !p.start) {
-    const d = new Date(now.getTime() - p.days * 86400000);
-    return { start:d.toISOString().split("T")[0], end:"now" };
-  }
-  // Fixed periods with explicit start and end
-  if (p.start && p.end && p.end !== "now") {
-    return { start:p.start, end:p.end };
-  }
-  // Fixed start, open end (e.g. 2026 YTD)
-  if (p.start && p.end === "now") {
-    return { start:p.start, end:"now" };
-  }
-  return { start:"2025-01-01", end:"now" };
-}
-
-function toggle(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
-
-// ── SHARED COMPONENTS ──────────────────────────────────────────
 function StatCard({label,value,sub,color}) {
   return (
-    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px"}}>
-      <div style={{fontSize:9,color:C.muted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:4}}>{label}</div>
-      <div style={{fontSize:18,fontWeight:800,color:color||C.text,letterSpacing:"-0.02em"}}>{value}</div>
-      {sub && <div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>}
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:12,flex:1,minWidth:90}}>
+      <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>{label}</div>
+      <div style={{fontSize:18,fontWeight:700,color:color||C.text}}>{value}</div>
+      {sub && <div style={{fontSize:9,color:C.muted,marginTop:2}}>{sub}</div>}
     </div>
   );
 }
 
-function Sel({label,value,onChange,options}) {
+function Btn({onClick,disabled,children,color,filled}) {
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:4}}>
-      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>{label}</span>
-      <select value={value} onChange={e=>onChange(e.target.value)} style={{
-        background:C.card,color:C.text,border:`1px solid ${C.border}`,
-        borderRadius:6,padding:"8px 10px",fontSize:12,cursor:"pointer",outline:"none"
-      }}>
-        {options.map(o=><option key={o.value||o} value={o.value||o}>{o.label||o}</option>)}
-      </select>
-    </div>
+    <button onClick={onClick} disabled={disabled} style={{
+      background:filled?(color||C.accent):"transparent",
+      color:filled?C.bg:(color||C.accent),
+      border:`1px solid ${color||C.accent}`,
+      borderRadius:8, padding:"10px 16px", fontSize:11, fontWeight:700,
+      letterSpacing:"0.05em", textTransform:"uppercase",
+      cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.5:1,
+    }}>{children}</button>
   );
 }
 
-function Toggle({label,value,onChange}) {
-  return (
-    <div onClick={()=>onChange(!value)} style={{
-      background:value?C.accentDim:C.card,border:`1px solid ${value?C.accent:C.border}`,
-      borderRadius:6,padding:"6px 10px",cursor:"pointer",
-      display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"
-    }}>
-      <div style={{width:7,height:7,borderRadius:"50%",background:value?C.accent:C.muted,flexShrink:0}}/>
-      <span style={{fontSize:11,color:value?C.accent:C.muted}}>{label}</span>
-    </div>
-  );
-}
-
-function ProgressBar({value,total}) {
-  const pct = total ? (value/total*100) : 0;
-  return (
-    <div style={{marginTop:10,background:C.dim,borderRadius:4,height:4}}>
-      <div style={{background:C.accent,height:4,borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
-    </div>
-  );
-}
-
-const EqTip = ({active,payload}) => {
-  if(!active||!payload?.length) return null;
-  return (
-    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",fontSize:11}}>
-      <div style={{color:C.muted}}>{fmtDate(payload[0].payload.t)}</div>
-      <div style={{color:C.accent,fontWeight:700}}>${fmt(payload[0].payload.eq)}</div>
-    </div>
-  );
-};
-
-function ChipRow({label,options,selected,onSelect,color}) {
-  const col = color || C.accent;
-  return (
-    <div style={{marginBottom:14}}>
-      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>{label}</span>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        {options.map(o=>(
-          <div key={o.value||o} onClick={()=>onSelect(o.value||o)} style={{
-            background:selected===(o.value||o)?`${col}15`:C.card,
-            border:`1px solid ${selected===(o.value||o)?col:C.border}`,
-            borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,
-            color:selected===(o.value||o)?col:C.text,
-            fontWeight:selected===(o.value||o)?700:400
-          }}>{o.label||o}</div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EngineChips({value,onChange}) {
-  const engines = [
-    {value:"pullback",  label:"BOS Pullback",    desc:"P1P2P3 v6.5 aligned"},
-  ];
-  return (
-    <div style={{marginBottom:14}}>
-      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Engine</span>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        {engines.map(m=>(
-          <div key={m.value} onClick={()=>onChange(m.value)} style={{
-            background:value===m.value?C.accentDim:C.card,
-            border:`1px solid ${value===m.value?C.accent:C.border}`,
-            borderRadius:8,padding:"10px 8px",cursor:"pointer"
-          }}>
-            <div style={{fontSize:11,fontWeight:700,color:value===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
-            <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EntryChips({value,onChange}) {
-  const modes = [
-    {value:"touch",     label:"Touch",     desc:"Fib hit = fill"},
-    {value:"rejection", label:"Rejection", desc:"Wick + close + green"},
-    {value:"reclaim",   label:"Reclaim",   desc:"Lose fib, win it back"},
-  ];
-  return (
-    <div style={{marginBottom:14}}>
-      <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Entry Mode</span>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-        {modes.map(m=>(
-          <div key={m.value} onClick={()=>onChange(m.value)} style={{
-            background:value===m.value?C.accentDim:C.card,
-            border:`1px solid ${value===m.value?C.accent:C.border}`,
-            borderRadius:8,padding:"10px 8px",cursor:"pointer"
-          }}>
-            <div style={{fontSize:11,fontWeight:700,color:value===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
-            <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── SINGLE TAB ─────────────────────────────────────────────────
-function SingleTab() {
-  const [symbol,    setSymbol]    = useState("XRP/USDT");
-  const [tf,        setTf]        = useState("1m");
-  const [period,    setPeriod]    = useState(1);
-  const [risk,      setRisk]      = useState("fixed");
-  const [pivotN,    setPivotN]    = useState(8);
-  const [rr,        setRr]        = useState(2);
-  const [fibLevel,  setFibLevel]  = useState(0.618);
-  const [minSwing,  setMinSwing]  = useState(0.002);
-  const [stopBuf,   setStopBuf]   = useState(0.001);
-  const [kStale,    setKStale]    = useState(0);
-  const [entryMode, setEntryMode] = useState("rejection");
-  const [bosBreak,  setBosBreak]  = useState("close");   // close | wick
-  const [atrSl,     setAtrSl]     = useState("p2");
-  const [engine,    setEngine]    = useState("structure");
-  const [showAdv,   setShowAdv]   = useState(false);
-  const [emaPair,   setEmaPair]   = useState("off");   // "off" | "13/21" | "34/55" etc
-  const [adxMin,    setAdxMin]    = useState(0);       // 0=off, 10/15/20/25/30
-  const [status,    setStatus]    = useState("idle");
-  const [result,    setResult]    = useState(null);
-  const [error,     setError]     = useState("");
-  const [chartTab,  setChartTab]  = useState("curve");
-  const [elapsed,   setElapsed]   = useState(0);
-  const [phase,     setPhase]     = useState("");
-
-  const TIMEOUT_MS = 120000; // 2 min hard timeout
-
-  const run = useCallback(async () => {
-    setStatus("loading"); setResult(null); setError(""); setElapsed(0);
-    setPhase("Connecting to server...");
-
-    // Elapsed timer
-    const startTime = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now()-startTime)/1000)), 500);
-
-    // Abort controller for timeout
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, TIMEOUT_MS);
-
-    try {
-      const {start,end} = getPeriodDates(PERIODS[period]);
-      setPhase("Fetching candle data...");
-      const res = await fetch(`${API}/backtest`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        signal: controller.signal,
-        body: JSON.stringify({
-          symbol, timeframe:tf, start_date:start, end_date:end,
-          pivot_n:pivotN, risk_method:risk, risk_pct:0.02, rr, fib_level:fibLevel,
-          min_swing_pct:minSwing, stop_buffer_pct:stopBuf, k_stale:kStale,
-          entry_mode:entryMode, engine, atr_sl:atrSl,
-          bos_break:bosBreak,
-          use_ema_filter:parseEma(emaPair).use,
-          ema_fast:parseEma(emaPair).fast,
-          ema_slow:parseEma(emaPair).slow,
-          adx_period:14, adx_threshold:adxMin
-        })
-      });
-      setPhase("Processing results...");
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      setResult(data); setStatus("done"); setPhase("");
-    } catch(e) {
-      const msg = e.name==="AbortError" ? `Timed out after ${TIMEOUT_MS/1000}s — try Prefetch tab first to cache data` : e.message;
-      setError(msg); setStatus("error"); setPhase("");
-    } finally {
-      clearInterval(timer);
-      clearTimeout(timeout);
-    }
-  }, [symbol,tf,period,risk,pivotN,rr,fibLevel,minSwing,stopBuf,kStale,entryMode,engine,emaPair,adxMin,bosBreak]);
-
-  const s = result?.stats, green = s && s.total_return >= 0, col = green ? C.accent : C.red;
-
-  return (
-    <div>
-      {/* Controls */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:20}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          <Sel label="Pair"      value={symbol} onChange={setSymbol}       options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
-          <Sel label="Timeframe" value={tf}     onChange={setTf}           options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
-          <Sel label="Period"    value={period} onChange={v=>setPeriod(+v)} options={PERIODS.map((p,i)=>({value:i,label:p.label}))}/>
-          <Sel label="Pivot N"   value={pivotN} onChange={v=>setPivotN(+v)} options={ALL_PIVOTS.map(n=>({value:n,label:`N=${n}`}))}/>
-        </div>
-
-        <ChipRow label="Fib Level"   options={ALL_FIBS}          selected={fibLevel} onSelect={v=>setFibLevel(+v)}/>
-        <ChipRow label="Risk:Reward" options={ALL_RR.map(r=>({value:r,label:`${r}R`}))} selected={rr} onSelect={v=>setRr(+v)}/>
-
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>Risk Method</span>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            {[{value:"fixed",label:"Fixed 2%",desc:"Safe"},{value:"half_kelly",label:"Half Kelly",desc:"Balanced"},{value:"full_kelly",label:"Full Kelly",desc:"Max"}].map(m=>(
-              <div key={m.value} onClick={()=>setRisk(m.value)} style={{
-                background:risk===m.value?C.accentDim:C.card,
-                border:`1px solid ${risk===m.value?C.accent:C.border}`,
-                borderRadius:8,padding:"10px 8px",cursor:"pointer"
-              }}>
-                <div style={{fontSize:11,fontWeight:700,color:risk===m.value?C.accent:C.text,marginBottom:2}}>{m.label}</div>
-                <div style={{fontSize:9,color:C.muted}}>{m.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <EngineChips value={engine} onChange={setEngine}/>
-        <EntryChips  value={entryMode} onChange={setEntryMode}/>
-
-        {/* BOS confirmation + timeout behavior (v8 engine) */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:14}}>
-          <div>
-            <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>BOS Confirm</span>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-              {[["close","Close"],["wick","Wick"]].map(([v,l])=>(
-                <div key={v} onClick={()=>setBosBreak(v)} style={{
-                  background:bosBreak===v?C.accentDim:C.surface,
-                  border:`1px solid ${bosBreak===v?C.accent:C.border}`,
-                  borderRadius:8,padding:"8px 6px",cursor:"pointer",textAlign:"center"
-                }}>
-                  <div style={{fontSize:11,color:bosBreak===v?C.accent:C.text,fontWeight:bosBreak===v?700:400}}>{l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* EMA Filter */}
-        <div style={{marginBottom:14}}>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
-            Stop Loss Mode
-          </span>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-            {ATR_SL_OPTS.map(o=>(
-              <div key={o.value} onClick={()=>setAtrSl(o.value)} style={{
-                background:atrSl===o.value?C.accentDim:C.surface,
-                border:`1px solid ${atrSl===o.value?C.accent:C.border}`,
-                borderRadius:8,padding:"8px 6px",cursor:"pointer",textAlign:"center"
-              }}>
-                <div style={{fontSize:11,color:atrSl===o.value?C.accent:C.text,fontWeight:atrSl===o.value?700:400}}>{o.label}</div>
-                <div style={{fontSize:9,color:C.muted,marginTop:2}}>{o.desc}</div>
-              </div>
-            ))}
-          </div>
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
-            EMA Pair
-          </span>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            {EMA_PAIRS.map(p=>(
-              <div key={p} onClick={()=>setEmaPair(p)} style={{
-                background:emaPair===p?C.accentDim:C.card,
-                border:`1px solid ${emaPair===p?C.accent:C.border}`,
-                borderRadius:6,padding:"6px 12px",cursor:"pointer",
-                fontSize:11,color:emaPair===p?C.accent:C.text,
-                fontWeight:emaPair===p?700:400
-              }}>{p==="off"?"Off":p}</div>
-            ))}
-          </div>
-
-          <span style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",display:"block",marginBottom:8}}>
-            ADX Threshold (Off = no filter)
-          </span>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {ADX_OPTS.map(v=>(
-              <div key={v} onClick={()=>setAdxMin(v)} style={{
-                background:adxMin===v?C.accentDim:C.card,
-                border:`1px solid ${adxMin===v?C.accent:C.border}`,
-                borderRadius:6,padding:"6px 12px",cursor:"pointer",
-                fontSize:11,color:adxMin===v?C.accent:C.text,
-                fontWeight:adxMin===v?700:400
-              }}>{v===0?"Off":v}</div>
-            ))}
-          </div>
-        </div>
-
-        {/* Advanced */}
-        <div onClick={()=>setShowAdv(!showAdv)} style={{
-          display:"flex",alignItems:"center",gap:6,cursor:"pointer",
-          marginBottom:showAdv?12:0,color:C.muted,fontSize:10,letterSpacing:"0.08em"
-        }}>
-          <span style={{color:showAdv?C.accent:C.muted}}>{showAdv?"▾":"▸"}</span>
-          ADVANCED PARAMS
-        </div>
-        {showAdv && (
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14,
-            background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
-            <div>
-              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>MIN SWING %</div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {[0.001,0.002,0.003,0.005].map(v=>(
-                  <div key={v} onClick={()=>setMinSwing(v)} style={{
-                    background:minSwing===v?C.accentDim:C.card,border:`1px solid ${minSwing===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:minSwing===v?C.accent:C.text
-                  }}>{(v*100).toFixed(1)}%</div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>SL BUFFER %</div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {[0,0.001,0.002,0.005].map(v=>(
-                  <div key={v} onClick={()=>setStopBuf(v)} style={{
-                    background:stopBuf===v?C.accentDim:C.card,border:`1px solid ${stopBuf===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:stopBuf===v?C.accent:C.text
-                  }}>{v===0?"None":(v*100).toFixed(1)+"%"}</div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>K STALE (candles)</div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {[0,10,20,50].map(v=>(
-                  <div key={v} onClick={()=>setKStale(v)} style={{
-                    background:kStale===v?C.accentDim:C.card,border:`1px solid ${kStale===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:10,color:kStale===v?C.accent:C.text
-                  }}>{v===0?"Off":v}</div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <button onClick={run} disabled={status==="loading"} style={{
-          background:status==="loading"?C.dim:C.accent,color:C.bg,border:"none",
-          borderRadius:8,padding:12,fontSize:13,fontWeight:800,
-          cursor:status==="loading"?"not-allowed":"pointer",letterSpacing:"0.08em",width:"100%"
-        }}>{status==="loading"?`⟳ RUNNING... ${elapsed}s`:"▶ RUN BACKTEST"}</button>
-
-        {status==="loading" && (
-          <div style={{marginTop:10,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <span style={{fontSize:10,color:C.muted}}>{phase}</span>
-              <span style={{fontSize:10,color:C.gold,fontWeight:700}}>{elapsed}s</span>
-            </div>
-            <div style={{background:C.dim,borderRadius:4,height:3,overflow:"hidden"}}>
-              <div style={{
-                height:3,borderRadius:4,background:C.accent,
-                width:`${Math.min((elapsed/120)*100,95)}%`,
-                transition:"width 0.5s linear"
-              }}/>
-            </div>
-            <div style={{marginTop:6,fontSize:9,color:C.muted}}>
-              {elapsed < 10 ? "Waking up server..." :
-               elapsed < 30 ? "Loading candle data from cache..." :
-               elapsed < 60 ? "Running backtest engine..." :
-               elapsed < 90 ? "Still working — large dataset..." :
-               "Almost done or may have stalled — check Prefetch tab if this continues"}
-            </div>
-          </div>
-        )}
-
-        {status==="error" && <div style={{color:C.red,fontSize:11,textAlign:"center",marginTop:8,padding:"8px 12px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>}
-      </div>
-
-      {/* Results */}
-      {status==="done" && result && s && (
-        <div>
-          {/* Meta badges */}
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>DATA: {result.source}</span>
-            <span style={{background:C.accentDim,border:`1px solid ${C.accent}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.accent}}>ENGINE: {engine.toUpperCase()}</span>
-            <span style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.muted}}>RISK: {result.risk_pct}%</span>
-            <span style={{background:C.goldDim,border:`1px solid ${C.gold}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.gold}}>RR: {result.rr}R · FIB: {fibLevel}</span>
-            <span style={{background:C.blueDim,border:`1px solid ${C.blue}`,borderRadius:4,padding:"3px 8px",fontSize:10,color:C.blue}}>ENTRY: {entryMode.toUpperCase()} · N={pivotN}</span>
-            {emaPair!=="off" && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>EMA {emaPair}</span>}
-            {adxMin>0 && <span style={{background:"#7c3aed15",border:"1px solid #7c3aed",borderRadius:4,padding:"3px 8px",fontSize:10,color:"#a78bfa"}}>ADX≥{adxMin}</span>}
-          </div>
-
-          {/* Hero return */}
-          <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-            <div>
-              <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>TOTAL RETURN</div>
-              <div style={{fontSize:40,fontWeight:800,color:col,lineHeight:1}}>{green?"+":""}{fmt(s.total_return)}%</div>
-            </div>
-            <div style={{flex:1,minWidth:180}}>
-              <div style={{fontSize:13,marginBottom:4}}>$100 → <strong style={{color:col}}>${fmt(s.final_equity)}</strong></div>
-              <div style={{fontSize:11,color:C.muted}}>{s.total_trades} trades · {s.wins}W / {s.losses}L · {fmt(s.win_rate)}% WR</div>
-              <div style={{fontSize:11,color:C.muted}}>CAGR {fmt(s.cagr)}% · Max DD -{fmt(s.max_drawdown)}% · Sharpe {fmt(s.sharpe)}</div>
-            </div>
-          </div>
-
-          {/* Stat grid */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-            <StatCard label="Final Equity"  value={`$${fmt(s.final_equity)}`}    color={col}/>
-            <StatCard label="CAGR"          value={`${fmt(s.cagr)}%`}            color={C.gold} sub="annualised"/>
-            <StatCard label="Daily Avg"     value={`${fmt(s.daily_return,3)}%`}/>
-            <StatCard label="Win Rate"      value={`${fmt(s.win_rate)}%`}        sub={`${s.wins}W / ${s.losses}L`}/>
-            <StatCard label="Profit Factor" value={fmt(s.profit_factor)}         color={s.profit_factor>=1.5?C.accent:C.red}/>
-            <StatCard label="Max Drawdown"  value={`-${fmt(s.max_drawdown)}%`}   color={C.red}/>
-            <StatCard label="Sharpe"        value={fmt(s.sharpe)}                color={s.sharpe>=1?C.accent:C.muted}/>
-            <StatCard label="Max Consec W"  value={s.max_consec_wins}            color={C.accent}/>
-            <StatCard label="Max Consec L"  value={s.max_consec_losses}          color={C.red}/>
-            <StatCard label="Avg Win $"     value={`$${fmt(s.avg_win,3)}`}       color={C.accent}/>
-            <StatCard label="Avg Loss $"    value={`$${fmt(s.avg_loss,3)}`}      color={C.red}/>
-            <StatCard label="Kelly Full"    value={`${fmt(s.kelly_full*100,1)}%`} color={C.gold} sub="optimal risk"/>
-            <StatCard label="Total Fees"    value={`$${fmt(s.total_fees||0,3)}`}   color={C.muted} sub="Bybit notional"/>
-          </div>
-
-          {/* Charts */}
-          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-            <div style={{display:"flex",borderBottom:`1px solid ${C.border}`}}>
-              {[["curve","Equity"],["dd","Drawdown"],["pnl","PnL Bar"]].map(([id,label])=>(
-                <button key={id} onClick={()=>setChartTab(id)} style={{
-                  flex:1,padding:"10px 8px",background:chartTab===id?C.card:"transparent",
-                  color:chartTab===id?C.accent:C.muted,border:"none",
-                  borderBottom:chartTab===id?`2px solid ${C.accent}`:"2px solid transparent",
-                  fontSize:10,cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"
-                }}>{label}</button>
-              ))}
-            </div>
-            <div style={{padding:"16px 8px"}}>
-              {chartTab==="curve" && (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={result.equity_curve} margin={{top:4,right:4,left:0,bottom:0}}>
-                    <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={col} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={col} stopOpacity={0}/>
-                    </linearGradient></defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                    <XAxis dataKey="t" tickFormatter={fmtDate} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={44}/>
-                    <Tooltip content={<EqTip/>}/>
-                    <ReferenceLine y={100} stroke={C.muted} strokeDasharray="4 4"/>
-                    <Area type="monotone" dataKey="eq" stroke={col} strokeWidth={2} fill="url(#grad)" dot={false}/>
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-              {chartTab==="dd" && (
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={result.equity_curve.map((d,i,arr)=>{
-                    const peak=Math.max(...arr.slice(0,i+1).map(x=>x.eq));
-                    return{t:d.t,dd:-((peak-d.eq)/peak*100)};
-                  })} margin={{top:4,right:4,left:0,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                    <XAxis dataKey="t" tickFormatter={fmtDate} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>v.toFixed(0)+"%"} width={40}/>
-                    <Tooltip formatter={v=>fmt(v)+"%"} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                    <Area type="monotone" dataKey="dd" stroke={C.red} strokeWidth={1.5} fill={C.redDim} dot={false}/>
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-              {chartTab==="pnl" && (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={result.trades} margin={{top:4,right:4,left:0,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                    <XAxis dataKey="id" tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false}/>
-                    <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
-                    <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                    <ReferenceLine y={0} stroke={C.muted}/>
-                    <Bar dataKey="pnl" fill={C.accent} radius={[2,2,0,0]}/>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-              {chartTab==="data" && (
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {(result.trades||[]).slice().reverse().map((t,i)=>{
-                    const fmtTs = (ts) => {
-                      try { return ts ? new Date(ts).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—"; }
-                      catch(e) { return "err"; }
-                    };
-                    const resCol = t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted;
-                    const dirCol = t.direction==="LONG"?C.accent:C.red;
-                    const pts = [
-                      {label:"P1", price:t.p1,  ts:t.p1_time,   col:"#ffd666"},
-                      {label:"P2", price:t.p2,  ts:t.p2_time,   col:"#3b8bff"},
-                      {label:"P3", price:t.p3,  ts:t.p3_time,   col:"#a78bfa"},
-                      {label:"Entry", price:t.entry, ts:t.entry_time, col:dirCol},
-                      {label:"Exit",  price:t.exit_price, ts:t.exit_time, col:resCol},
-                    ];
-                    return (
-                      <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px"}}>
-                        {/* Header row */}
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:dirCol}}>
-                            #{t.id} {t.direction==="LONG"?"LONG":"SHORT"}
-                          </span>
-                          <span style={{fontSize:10,fontWeight:700,color:resCol}}>{t.result}</span>
-                        </div>
-                        {/* Data points grid */}
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
-                          {pts.map(p=>(
-                            <div key={p.label} style={{background:C.surface,borderRadius:4,padding:"4px 6px"}}>
-                              <div style={{fontSize:8,color:C.muted,marginBottom:2}}>{p.label}</div>
-                              <div style={{fontSize:9,color:p.col,fontWeight:700}}>{p.price||"—"}</div>
-                              <div style={{fontSize:8,color:p.ts?C.muted:C.red,marginTop:2}}>
-                                {fmtTs(p.ts)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Trade Chart Visualizer */}
-          <ChartErrorBoundary>
-            <TradeChartViz result={result} symbol={symbol} tf={tf}/>
-          </ChartErrorBoundary>
-
-          {/* Trade log */}
-          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
-            <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-              Trade Log · Last {result.trades.length} trades
-            </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                <thead><tr style={{background:C.bg}}>
-                  {["#","Dir","Entry Time","P1","P2","P3","Fib618","Fill","SL","TP","Exit","Result","Gross","Fee","PnL","Equity"].map(h=>(
-                    <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {[...result.trades].reverse().map(t=>(
-                    <tr key={t.id} style={{borderTop:`1px solid ${C.border}`}}>
-                      <td style={{padding:"6px 10px",color:C.muted}}>{t.id}</td>
-                      <td style={{padding:"6px 10px"}}>
-                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
-                      </td>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.entry_time)}</td>
-                      <td style={{padding:"6px 10px",color:C.gold}}>{t.p1||"—"}</td>
-                      <td style={{padding:"6px 10px",color:C.blue}}>{t.p2||"—"}</td>
-                      <td style={{padding:"6px 10px",color:C.gold}}>{t.p3||"—"}</td>
-                      <td style={{padding:"6px 10px",color:C.muted}}>{t.fib_entry||"—"}</td>
-                      <td style={{padding:"6px 10px",fontWeight:700}}>{t.entry}</td>
-                      <td style={{padding:"6px 10px",color:C.red}}>{t.sl}</td>
-                      <td style={{padding:"6px 10px",color:C.accent}}>{t.tp}</td>
-                      <td style={{padding:"6px 10px"}}>{t.exit_price}</td>
-                      <td style={{padding:"6px 10px",color:t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted,fontWeight:700}}>{t.result}</td>
-                      <td style={{padding:"6px 10px",color:t.gross_pnl>=0?C.accent:C.red}}>{t.gross_pnl>=0?"+":""}{fmt(t.gross_pnl||t.pnl)}</td>
-                      <td style={{padding:"6px 10px",color:C.muted}}>-{fmt(t.fee||0,4)}</td>
-                      <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red,fontWeight:700}}>{t.pnl>=0?"+":""}{fmt(t.pnl)}</td>
-                      <td style={{padding:"6px 10px"}}>${fmt(t.equity)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-      {status==="idle" && <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>Configure above and hit <span style={{color:C.accent}}>▶ RUN BACKTEST</span></div>}
-    </div>
-  );
-}
-
-
-// ── CHART ERROR BOUNDARY ──────────────────────────────────────
-class ChartErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = {error: null}; }
-  static getDerivedStateFromError(e) { return {error: e.message}; }
-  render() {
-    if (this.state.error) return (
-      <div style={{background:"#ff446615",border:"1px solid #ff4466",borderRadius:12,padding:16,marginBottom:16,fontSize:11,color:"#ff4466"}}>
-        Chart error: {this.state.error}
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
-// ── TRADE CHART VISUALIZER ─────────────────────────────────────
-function TradeChartViz({result, symbol, tf}) {
-  const [candles,     setCandles]     = React.useState([]);
-  const [loading,     setLoading]     = React.useState(false);
-  const [error,       setError]       = React.useState("");
-  const [selTradeIdx, setSelTradeIdx] = React.useState(null); // index into trades array
-  const THRESHOLD = 300; // max candles for snapshot view
-
-  const trades = React.useMemo(() => {
-    if (!result?.trades) return [];
-    return [...result.trades].reverse(); // chronological order
-  }, [result]);
-
-  React.useEffect(() => {
-    if (!result) return;
-    loadCandles();
-  }, [result, symbol, tf]);
-
-  React.useEffect(() => {
-    // When trades load, default to trade 0 view
-    if (candles.length > 0 && trades.length > 0 && selTradeIdx === null) {
-      setSelTradeIdx(0);
-    }
-  }, [candles]);
-
-  const loadCandles = async () => {
-    setLoading(true); setError("");
-    try {
-      const allTs = trades.flatMap(t => [t.entry_time, t.exit_time, t.p1_time, t.p2_time, t.p3_time]).filter(Boolean);
-      if (allTs.length === 0) { setLoading(false); return; }
-      const tfMs    = tf==="1h"?3600000 : tf==="15m"?900000 : tf==="5m"?300000 : 60000;
-      // Start from earliest p1_time across all trades minus 15 candles
-      const p1Times = trades.map(t => t.p1_time).filter(Boolean);
-      const earliestP1 = p1Times.length ? Math.min(...p1Times) : Math.min(...allTs);
-      const startMs = earliestP1 - tfMs * 15;
-      // End at latest exit_time plus 15 candles
-      const exitTimes = trades.map(t => t.exit_time).filter(Boolean);
-      const latestExit = exitTimes.length ? Math.max(...exitTimes) : Math.max(...allTs);
-      const endMs   = latestExit + tfMs * 15;
-      const params  = new URLSearchParams({symbol, timeframe:tf, start_ms:startMs, end_ms:endMs, limit:5000});
-      const res     = await fetch(`${API}/candles?${params}`);
-      if (!res.ok) throw new Error("API error " + res.status);
-      const data    = await res.json();
-      if (!data.success) throw new Error(data.error || "Failed");
-      setCandles(data.candles || []);
-    } catch(e) { setError("Cannot load candles: " + e.message); }
-    setLoading(false);
-  };
-
-  // ── Trade navigation ───────────────────────────────────────
-  const goTrade = (dir) => {
-    setSelTradeIdx(prev => {
-      const next = (prev === null ? 0 : prev) + dir;
-      return Math.max(0, Math.min(trades.length - 1, next));
-    });
-  };
-
-  const selTrade = selTradeIdx !== null ? trades[selTradeIdx] : null;
-
-  // ── Compute visible candle window ──────────────────────────
-  const {visibleCandles, tooWide, candleCount} = React.useMemo(() => {
-    if (!candles.length) return {visibleCandles:[], tooWide:false, candleCount:0};
-
-    if (selTrade) {
-      // Snapshot mode: 10 before P1, 10 after exit
-      // Window: 10 candles before P1, 10 after exit
-      const p1Ts   = selTrade.p1_time || selTrade.entry_time;
-      const exitTs = selTrade.exit_time || selTrade.entry_time;
-      // Find p1Idx - nearest candle to p1_time
-      let p1Idx = 0, p1BestDiff = Infinity;
-      candles.forEach((c, i) => {
-        const d = Math.abs(c.ts - p1Ts);
-        if (d < p1BestDiff) { p1BestDiff = d; p1Idx = i; }
-      });
-      // Find exIdx - nearest candle to exit_time
-      let exIdx = candles.length - 1, exBestDiff = Infinity;
-      candles.forEach((c, i) => {
-        const d = Math.abs(c.ts - exitTs);
-        if (d < exBestDiff) { exBestDiff = d; exIdx = i; }
-      });
-      const s = Math.max(0, p1Idx - 10);
-      const e = Math.min(candles.length - 1, exIdx + 10);
-      const count  = e - s + 1;
-      if (count > THRESHOLD) return {visibleCandles:[], tooWide:true, candleCount:count};
-      return {visibleCandles: candles.slice(s, e+1), tooWide:false, candleCount:count};
-    } else {
-      // Browse mode: show 80 candles centered around current trade
-      const t     = trades[selTradeIdx ?? 0];
-      const refTs = t?.entry_time || candles[0]?.ts;
-      const idx   = candles.findIndex(c => c.ts >= refTs);
-      const s     = Math.max(0, (idx === -1 ? 0 : idx) - 20);
-      return {visibleCandles: candles.slice(s, s+80), tooWide:false, candleCount:80};
-    }
-  }, [candles, selTrade, selTradeIdx, trades]);
-
-  // ── Chart drawing ──────────────────────────────────────────
-  const W = 345, H = 260, PAD = {top:24, right:10, bottom:24, left:54};
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top  - PAD.bottom;
-  const N      = visibleCandles.length || 1;
-
-  const allPrices = visibleCandles.flatMap(c => [c.high, c.low]);
-  if (selTrade) {
-    [selTrade.entry, selTrade.sl, selTrade.tp, selTrade.fib_entry,
-     selTrade.p1, selTrade.p2, selTrade.p3].forEach(v => { if(v) allPrices.push(v); });
-  }
-  const minP  = allPrices.length ? Math.min(...allPrices)*0.9994 : 0;
-  const maxP  = allPrices.length ? Math.max(...allPrices)*1.0006 : 1;
-  const range = maxP - minP || 1;
-
-  const cw  = Math.max(2, chartW/N - 1);
-  const toX = (i) => { if (i == null || isNaN(i)) return -999; return PAD.left + i*(chartW/N) + cw/2; };
-  const toY = (p) => { if (p == null || isNaN(p)) return -999; return PAD.top + chartH - ((p-minP)/range)*chartH; };
-
-  // Map ts → candle index in visible window
-  // For each trade, find indices of P1/P2/P3/entry/exit in visible window
-  // Everything computed fresh inside useMemo with correct dependencies
-  const tradeAnno = React.useMemo(() => {
-    if (!visibleCandles.length || !candles.length) return [];
-
-    // Build lookup: ts -> index within visibleCandles
-    const visMap = {};
-    visibleCandles.forEach((c, i) => { visMap[c.ts] = i; });
-    const visStartTs = visibleCandles[0].ts;
-    const visEndTs   = visibleCandles[visibleCandles.length - 1].ts;
-
-    // Build global ts -> index map
-    const globalMap = {};
-    candles.forEach((c, i) => { globalMap[c.ts] = i; });
-
-    // Find nearest visible index for a timestamp
-    const findIdx = (ts) => {
-      if (!ts) return null;
-      // Exact match in visible
-      if (visMap[ts] !== undefined) return visMap[ts];
-      // Find nearest in all candles
-      let globalIdx = globalMap[ts];
-      if (globalIdx === undefined) {
-        let best = 0, bestDiff = Infinity;
-        candles.forEach((c, i) => {
-          const d = Math.abs(c.ts - ts);
-          if (d < bestDiff) { bestDiff = d; best = i; }
-        });
-        globalIdx = best;
-      }
-      const cTs = candles[globalIdx].ts;
-      // Must be within visible window
-      if (cTs < visStartTs || cTs > visEndTs) return null;
-      // Find in visibleCandles
-      return visMap[cTs] ?? null;
-    };
-
-    return trades.map((t, ti) => {
-      const tid    = t.id ?? (ti+1);
-      const entryI = findIdx(t.entry_time);
-      const exitI  = findIdx(t.exit_time);
-      const p1I    = findIdx(t.p1_time);
-      const p2I    = findIdx(t.p2_time);
-      const p3I    = findIdx(t.p3_time);
-      return {t, tid, entryI, exitI, p1I, p2I, p3I};
-    });
-  }, [trades, visibleCandles, candles]);
-
-  // ── Render ─────────────────────────────────────────────────
-  if (loading) return (
-    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:20,marginBottom:16,textAlign:"center",color:C.muted,fontSize:11}}>
-      ⟳ Loading candles...
-    </div>
-  );
-
-  return (
-    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:12,marginBottom:16}}>
-      {/* Header */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <span style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-          📊 {symbol} {tf?.toUpperCase()} · {candles.length} candles
-          {selTrade ? ` · Trade #${selTrade.id ?? (selTradeIdx+1)} snapshot` : " · Browse"}
-        </span>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          {selTrade && <button onClick={()=>setSelTradeIdx(null)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",color:C.muted,fontSize:9,cursor:"pointer"}}>✕ Deselect</button>}
-          <button onClick={loadCandles} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
-        </div>
-      </div>
-
-      {error && <div style={{color:C.red,fontSize:11,padding:"8px 12px",background:C.redDim,borderRadius:6,marginBottom:8}}>{error}</div>}
-      {!loading && candles.length === 0 && !error && (
-        <div style={{textAlign:"center",padding:"30px 0",color:C.muted,fontSize:11}}>No candles — Prefetch {symbol} {tf?.toUpperCase()} first</div>
-      )}
-
-      {candles.length > 0 && (
-        <div>
-          {/* Trade navigation */}
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <button onClick={()=>goTrade(-5)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀◀</button>
-            <button onClick={()=>goTrade(-1)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>◀</button>
-            <div style={{flex:1,textAlign:"center"}}>
-              {selTrade ? (
-                <span style={{fontSize:10,color:selTrade.won?C.accent:selTrade.result==="TIMEOUT"?C.muted:C.red,fontWeight:700}}>
-                  Trade {selTradeIdx+1} / {trades.length} · #{selTrade.id ?? (selTradeIdx+1)} · {selTrade.direction} · {selTrade.result}
-                </span>
-              ) : (
-                <span style={{fontSize:10,color:C.muted}}>
-                  {visibleCandles[0] ? new Date(visibleCandles[0].ts).toLocaleDateString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
-                </span>
-              )}
-            </div>
-            <button onClick={()=>goTrade(1)}  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶</button>
-            <button onClick={()=>goTrade(5)}  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:4,padding:"5px 10px",color:C.text,fontSize:11,cursor:"pointer"}}>▶▶</button>
-          </div>
-
-          {/* Too wide warning */}
-          {tooWide && (
-            <div style={{textAlign:"center",padding:"24px",color:C.gold,fontSize:11,background:C.goldDim,borderRadius:8,marginBottom:8,border:`1px solid ${C.gold}`}}>
-              ⚠️ Trade snapshot too wide ({candleCount} candles &gt; {THRESHOLD} threshold)<br/>
-              <span style={{fontSize:9,color:C.muted}}>This trade held too long. Browse mode available.</span>
-            </div>
-          )}
-
-          {/* SVG Chart */}
-          {!tooWide && visibleCandles.length > 0 && (
-            <div style={{overflowX:"auto"}}>
-              <svg width={W} height={H} style={{display:"block",margin:"0 auto",fontFamily:"IBM Plex Mono,monospace"}}>
-                <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} fill="#0d1117" rx="3"/>
-
-                {/* Grid */}
-                {[0,0.25,0.5,0.75,1].map(f=>{
-                  const y=PAD.top+f*chartH, p=maxP-f*range;
-                  return <g key={f}>
-                    <line x1={PAD.left} y1={y} x2={PAD.left+chartW} y2={y} stroke="#1c2433" strokeWidth="0.5"/>
-                    <text x={PAD.left-3} y={y+3} textAnchor="end" fontSize="7" fill="#6e7681">{p.toFixed(5)}</text>
-                  </g>;
-                })}
-
-                {/* Selected trade SL / TP / Fib horizontal lines */}
-                {selTrade && (() => {
-                  const tid = selTrade.id ?? (selTradeIdx+1);
-                  return <>
-                    {selTrade.tp && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.tp)} x2={PAD.left+chartW} y2={toY(selTrade.tp)} stroke="#00ff9d" strokeWidth="0.8" strokeDasharray="4,3" opacity="0.6"/>
-                      <text x={PAD.left-3} y={toY(selTrade.tp)+3} textAnchor="end" fontSize="7" fill="#00ff9d" opacity="0.9">TP</text>
-                    </g>}
-                    {selTrade.sl && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.sl)} x2={PAD.left+chartW} y2={toY(selTrade.sl)} stroke="#ff4466" strokeWidth="0.8" strokeDasharray="4,3" opacity="0.6"/>
-                      <text x={PAD.left-3} y={toY(selTrade.sl)+3} textAnchor="end" fontSize="7" fill="#ff4466" opacity="0.9">SL</text>
-                    </g>}
-                    {selTrade.fib_entry && <g>
-                      <line x1={PAD.left} y1={toY(selTrade.fib_entry)} x2={PAD.left+chartW} y2={toY(selTrade.fib_entry)} stroke="#ffd666" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
-                      <text x={PAD.left-3} y={toY(selTrade.fib_entry)+3} textAnchor="end" fontSize="7" fill="#ffd666" opacity="0.8">Fib</text>
-                    </g>}
-                    {selTrade.entry && (() => {
-                      // Only show Fill line if meaningfully different from Fib level
-                      const fibDiff = selTrade.fib_entry ? Math.abs(selTrade.entry - selTrade.fib_entry) / selTrade.fib_entry : 1;
-                      if (fibDiff < 0.0005) return null; // too close to Fib, skip
-                      return <g>
-                        <line x1={PAD.left} y1={toY(selTrade.entry)} x2={PAD.left+chartW} y2={toY(selTrade.entry)} stroke="#3b8bff" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.5"/>
-                        <text x={PAD.left-3} y={toY(selTrade.entry)+3} textAnchor="end" fontSize="7" fill="#3b8bff" opacity="0.8">Fill</text>
-                      </g>;
-                    })()}
-                  </>;
-                })()}
-
-                {/* Candles */}
-                {visibleCandles.map((c,i)=>{
-                  const x   = toX(i), yH=toY(c.high), yL=toY(c.low);
-                  const yO  = toY(c.open), yC=toY(c.close);
-                  const bull= c.close>=c.open;
-                  const col = bull?"#00ff9d":"#ff4466";
-                  return <g key={c.ts}>
-                    <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth="1" opacity="0.6"/>
-                    <rect x={x-cw/2} y={Math.min(yO,yC)} width={cw} height={Math.max(1,Math.abs(yC-yO))} fill={col} opacity="0.85"/>
-                  </g>;
-                })}
-
-                {/* Trade annotations */}
-                {tradeAnno.map(({t, tid, entryI, exitI, p1I, p2I, p3I})=>{
-                  const isSelected = selTrade && (selTrade.id ?? (selTradeIdx+1)) === tid;
-                  const opacity    = selTrade && !isSelected ? 0.25 : 1;
-                  const entryCol   = t.direction==="LONG" ? "#00ff9d" : "#ff4466";
-                  const exitCol    = t.result==="TP" ? "#00ff9d" : t.result==="SL" ? "#ff4466" : "#6e7681";
-                  const elems      = [];
-
-                  // In snapshot mode — only show full labels for selected trade
-                  // Other trades: just a small dot at entry, no text
-                  const showLabels = !selTrade || isSelected;
-
-                  if (!showLabels) {
-                    // Non-selected trade in snapshot: tiny dot only
-                    if (entryI != null && t.entry) {
-                      const x=toX(entryI), y=toY(t.entry);
-                      elems.push(<g key="entry" opacity={0.2}>
-                        <circle cx={x} cy={y} r="2" fill={entryCol}/>
-                      </g>);
-                    }
-                  } else {
-                    // Full labels — selected trade or browse mode
-                    // P1 subtle vertical dotted line + x-axis label
-                    if (p1I != null) {
-                      const x=toX(p1I);
-                      elems.push(<g key="p1" opacity={showLabels ? opacity : 0.15}>
-                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#ffd666" strokeWidth="1" strokeDasharray="2,3"/>
-                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#ffd666" fontWeight="700">P1</text>
-                      </g>);
-                    }
-                    // P2 subtle vertical dotted line + x-axis label
-                    if (p2I != null) {
-                      const x=toX(p2I);
-                      elems.push(<g key="p2" opacity={showLabels ? opacity : 0.15}>
-                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#3b8bff" strokeWidth="1" strokeDasharray="2,3"/>
-                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#3b8bff" fontWeight="700">P2</text>
-                      </g>);
-                    }
-                    // P3 subtle vertical dotted line + x-axis label
-                    if (p3I != null) {
-                      const x=toX(p3I);
-                      elems.push(<g key="p3" opacity={showLabels ? opacity : 0.15}>
-                        <line x1={x} y1={PAD.top} x2={x} y2={PAD.top+chartH} stroke="#a78bfa" strokeWidth="1" strokeDasharray="2,3"/>
-                        <text x={x} y={PAD.top+chartH+18} textAnchor="middle" fontSize="7" fill="#a78bfa" fontWeight="700">P3</text>
-                      </g>);
-                    }
-                    if (entryI != null && t.entry) {
-                      const x=toX(entryI), y=toY(t.entry);
-                      const label = `${t.direction==="LONG"?"L":"S"}[${tid}]`;
-                      elems.push(<g key="entry" opacity={opacity}>
-                        <circle cx={x} cy={y} r="4" fill={entryCol} opacity="0.9"/>
-                        <text x={x} y={y-(t.direction==="LONG"?10:-4)} textAnchor="middle" fontSize="7" fill={entryCol} fontWeight="700">{label}</text>
-                      </g>);
-                    }
-                    if (exitI != null && t.exit_price) {
-                      const x=toX(exitI), y=toY(t.exit_price);
-                      const label = `${t.result==="TP"?"TP":t.result==="SL"?"SL":"TO"}[${tid}]`;
-                      elems.push(<g key="exit" opacity={opacity}>
-                        <polygon points={`${x},${y+8} ${x-4},${y+14} ${x+4},${y+14}`} fill={exitCol}/>
-                        <text x={x} y={y+22} textAnchor="middle" fontSize="7" fill={exitCol} fontWeight="700">{label}</text>
-                      </g>);
-                    }
-                  }
-
-                  return <g key={tid}>{elems}</g>;
-                })}
-
-                {/* Time axis */}
-                {visibleCandles.filter((_,i)=>i%Math.max(1,Math.floor(N/5))===0).map((c,_,arr)=>{
-                  const i=visibleCandles.indexOf(c);
-                  return <text key={c.ts} x={toX(i)} y={H-6} textAnchor="middle" fontSize="7" fill="#6e7681">
-                    {new Date(c.ts).toLocaleDateString("en-MY",{month:"short",day:"numeric"})}
-                  </text>;
-                })}
-              </svg>
-            </div>
-          )}
-
-          {/* Legend */}
-          <div style={{display:"flex",gap:10,marginTop:6,flexWrap:"wrap",fontSize:9,color:C.muted}}>
-            <span><span style={{color:"#00ff9d"}}>●</span> L[n] Long</span>
-            <span><span style={{color:"#ff4466"}}>●</span> S[n] Short</span>
-            <span><span style={{color:"#ffd666"}}>●</span> P1[n]</span>
-            <span><span style={{color:"#3b8bff"}}>●</span> P2[n]</span>
-            <span><span style={{color:"#a78bfa"}}>●</span> P3[n]</span>
-            <span><span style={{color:"#00ff9d"}}>▲</span>/<span style={{color:"#ff4466"}}>▲</span> Exit</span>
-            <span style={{marginLeft:"auto",color:C.gold}}>{trades.length} trades</span>
-          </div>
-
-          {/* Trade chips */}
-          <div style={{marginTop:10}}>
-
-            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-              {trades.map((t,i)=>{
-                const tid = t.id ?? (i+1);
-                const col = t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted;
-                const active = selTradeIdx === i;
-                return <div key={i} onClick={()=>setSelTradeIdx(active ? null : i)} style={{
-                  background: active?(t.result==="TP"?C.accentDim:t.result==="SL"?C.redDim:C.dim):C.card,
-                  border:`1px solid ${active?col:C.border}`,
-                  borderRadius:4,padding:"4px 8px",cursor:"pointer",fontSize:9,
-                  color:col,whiteSpace:"nowrap"
-                }}>
-                  #{tid} {t.direction==="LONG"?"L":"S"} {t.result}
-                </div>;
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-// ── PREFETCH TAB ───────────────────────────────────────────────
-function PrefetchTab() {
-  const [symbol,    setSymbol]    = useState("XRP/USDT");
-  const [tf,        setTf]        = useState("1m");
-  const [startDate, setStartDate] = useState("2025-01-01");
-  const [endDate,   setEndDate]   = useState("now");
-  const [status,      setStatus]      = useState(null);
-  const [polling,     setPolling]     = useState(false);
-  const [jobStatus,   setJobStatus]   = useState(null);
-  const [batchLog,    setBatchLog]    = useState([]);
-  const [batchRunning,setBatchRunning]= useState(false);
-  const [deleting,    setDeleting]    = useState(false);
-  const [deleteLog,   setDeleteLog]   = useState([]);
-  const [showDelete,  setShowDelete]  = useState(false);
-
-  const prefetch = async () => {
-    setStatus("queuing"); setJobStatus(null);
-    try {
-      const res  = await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,timeframe:tf,start_date:startDate,end_date:endDate})});
-      const data = await res.json();
-      setStatus(data.status);
-      setPolling(true);
-    } catch(e) { setStatus("error"); }
-  };
-
-  const prefetchAll = async () => {
-    if (batchRunning) return;
-    setBatchRunning(true);
-    setBatchLog([]);
-    for (const pair of ALL_PAIRS) {
-      setBatchLog(prev => [...prev, {pair, tf, status:"queuing"}]);
-      try {
-        const res  = await fetch(`${API}/prefetch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:pair,timeframe:tf,start_date:startDate,end_date:endDate})});
-        const data = await res.json();
-        setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:data.status} : r));
-        await new Promise(r => setTimeout(r, 3000));
-      } catch(e) {
-        setBatchLog(prev => prev.map(r => r.pair===pair ? {...r, status:"error"} : r));
-      }
-    }
-    setBatchRunning(false);
-  };
-
-  const deleteCandles = async (pairToDelete, wipeAll=false) => {
-    if (deleting) return;
-    const pairs = pairToDelete ? [pairToDelete] : ALL_PAIRS;
-    setDeleting(true);
-    setDeleteLog([]);
-    for (const pair of pairs) {
-      setDeleteLog(prev => [...prev, {pair, status:"deleting"}]);
-      try {
-        const body = wipeAll
-          ? {symbol:pair, timeframe:tf, start_date:"2020-01-01", end_date:"now"}
-          : {symbol:pair, timeframe:tf, start_date:startDate, end_date:endDate};
-        const res  = await fetch(`${API}/delete-candles`, {
-          method:"DELETE",
-          headers:{"Content-Type":"application/json"},
-          body: JSON.stringify(body)
-        });
-        const data = await res.json();
-        setDeleteLog(prev => prev.map(r => r.pair===pair ? {...r, status:"deleted", count:data.deleted||0} : r));
-      } catch(e) {
-        setDeleteLog(prev => prev.map(r => r.pair===pair ? {...r, status:"error"} : r));
-      }
-    }
-    setDeleting(false);
-  };
-
-  useEffect(() => {
-    if (!polling) return;
-    const interval = setInterval(async () => {
-      try {
-        const res  = await fetch(`${API}/prefetch-status?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}&start_date=${startDate}&end_date=${endDate}`);
-        const data = await res.json();
-        setJobStatus(data);
-        if (data.job_status === "done" || data.job_status === "error") setPolling(false);
-      } catch(e) {}
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [polling, symbol, tf, startDate, endDate]);
-
-  const pct = jobStatus?.completeness_pct || 0;
-  const ready = jobStatus?.ready;
-
-  return (
-    <div>
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:14}}>
-          Pre-load candle data into Supabase cache
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          <Sel label="Pair"      value={symbol} onChange={setSymbol} options={ALL_PAIRS.map(p=>({value:p,label:p}))}/>
-          <Sel label="Timeframe" value={tf}     onChange={setTf}     options={ALL_TIMEFRAMES.map(t=>({value:t,label:t.toUpperCase()}))}/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          <div>
-            <div style={{fontSize:9,color:C.muted,marginBottom:4}}>START DATE</div>
-            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} style={{
-              width:"100%",background:C.card,color:C.text,border:`1px solid ${C.border}`,
-              borderRadius:6,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit"
-            }}/>
-          </div>
-          <div>
-            <div style={{fontSize:9,color:C.muted,marginBottom:4}}>END DATE</div>
-            <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} style={{
-              width:"100%",background:C.card,color:C.text,border:`1px solid ${C.border}`,
-              borderRadius:6,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit"
-            }}/>
-          </div>
-        </div>
-        <button onClick={prefetch} disabled={polling||batchRunning} style={{
-          background:polling||batchRunning?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
-          padding:12,fontSize:13,fontWeight:800,cursor:polling||batchRunning?"not-allowed":"pointer",
-          letterSpacing:"0.08em",width:"100%",marginBottom:8
-        }}>{polling?"⟳ FETCHING...":"⬇ PREFETCH THIS PAIR"}</button>
-        <button onClick={prefetchAll} disabled={batchRunning||polling} style={{
-          background:batchRunning?C.dim:C.accent,color:C.bg,border:"none",borderRadius:8,
-          padding:12,fontSize:13,fontWeight:800,cursor:batchRunning||polling?"not-allowed":"pointer",
-          letterSpacing:"0.08em",width:"100%"
-        }}>{batchRunning?"⟳ FETCHING ALL PAIRS...":"⬇⬇ PREFETCH ALL 6 PAIRS"}</button>
-      </div>
-
-      {batchLog.length > 0 && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>
-            Batch Prefetch — {tf.toUpperCase()} · {startDate} → {endDate}
-          </div>
-          {batchLog.map(r=>(
-            <div key={r.pair} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
-              <span style={{fontSize:12,color:C.text}}>{r.pair}</span>
-              <span style={{fontSize:10,fontWeight:700,color:r.status==="done"?C.accent:r.status==="error"?C.red:C.gold}}>
-                {r.status==="done"?"✓ QUEUED":r.status==="error"?"✗ ERROR":r.status==="queuing"?"⟳ QUEUING...":"⟳ "+r.status.toUpperCase()}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Delete Candles Section */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div onClick={()=>setShowDelete(!showDelete)} style={{
-          display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"
-        }}>
-          <span style={{fontSize:10,color:C.red,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:700}}>
-            🗑 Delete Candle Data
-          </span>
-          <span style={{fontSize:10,color:C.muted}}>{showDelete?"▾":"▸"}</span>
-        </div>
-        {showDelete && (
-          <div style={{marginTop:12}}>
-            <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
-              Deletes candles from Supabase for the selected timeframe and date range. Use this to force a fresh fetch on next backtest run.
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <button onClick={()=>deleteCandles(symbol)} disabled={deleting} style={{
-                background:deleting?C.dim:C.redDim,color:C.red,
-                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
-                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
-              }}>🗑 {symbol.replace("/USDT","")} (date range)</button>
-              <button onClick={()=>deleteCandles(null)} disabled={deleting} style={{
-                background:deleting?C.dim:C.redDim,color:C.red,
-                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
-                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
-              }}>🗑🗑 All Pairs (date range)</button>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <button onClick={()=>deleteCandles(symbol, true)} disabled={deleting} style={{
-                background:deleting?C.dim:C.redDim,color:C.red,
-                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
-                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
-              }}>🗑 {symbol.replace("/USDT","")} (ALL history)</button>
-              <button onClick={()=>deleteCandles(null, true)} disabled={deleting} style={{
-                background:deleting?C.dim:C.redDim,color:C.red,
-                border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 8px",
-                fontSize:11,fontWeight:700,cursor:deleting?"not-allowed":"pointer"
-              }}>🗑🗑 All Pairs (ALL history)</button>
-            </div>
-            {deleteLog.length > 0 && (
-              <div style={{marginTop:10}}>
-                {deleteLog.map(r=>(
-                  <div key={r.pair} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>
-                    <span style={{fontSize:11,color:C.text}}>{r.pair}</span>
-                    <span style={{fontSize:10,fontWeight:700,color:r.status==="deleted"?C.accent:r.status==="error"?C.red:C.muted}}>
-                      {r.status==="deleted"?`✓ Deleted ${r.count||""} rows`:r.status==="error"?"✗ Error":"⟳ Deleting..."}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {jobStatus && (
-        <div style={{background:C.surface,border:`1px solid ${ready?C.accent:C.border}`,borderRadius:12,padding:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <span style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em"}}>
-              {symbol} {tf.toUpperCase()} · {startDate} → {endDate}
-            </span>
-            <span style={{fontSize:10,fontWeight:700,color:ready?C.accent:C.gold}}>
-              {ready?"✓ READY":"⟳ LOADING"}
-            </span>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
-            <StatCard label="DB Candles"   value={jobStatus.db_candles?.toLocaleString()||"—"}/>
-            <StatCard label="Expected"     value={jobStatus.expected?.toLocaleString()||"—"}/>
-            <StatCard label="Completeness" value={`${pct}%`} color={ready?C.accent:C.gold}/>
-          </div>
-          <div style={{background:C.dim,borderRadius:4,height:6}}>
-            <div style={{background:ready?C.accent:C.gold,height:6,borderRadius:4,width:`${Math.min(pct,100)}%`,transition:"width 0.5s"}}/>
-          </div>
-          {jobStatus.error && <div style={{color:C.red,fontSize:11,marginTop:8}}>✗ {jobStatus.error}</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── JOURNAL TAB (Paper) ────────────────────────────────────────
-function JournalTab() {
-  const [account,      setAccount]      = useState(null);
-  const [trades,       setTrades]       = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState("");
-  const [filterPair,   setFilterPair]   = useState("all");
-  const [filterTF,     setFilterTF]     = useState("all");
-  const [filterLabel,  setFilterLabel]  = useState("all");
-  const [filterResult, setFilterResult] = useState("all");
-  const [tab,          setTab]          = useState("overview");
-
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
-    try {
-      const res  = await fetch(`${API}/journal`);
-      const data = await res.json();
-      if (data.success) {
-        setAccount(data.account||null);
-        setTrades(Array.isArray(data.trades)?data.trades:[]);
-      } else throw new Error(data.error||"Failed");
-    } catch(e) { setError(e.message); }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { load(); }, []);
-
-  const pairs  = useMemo(() => ["all",...new Set(trades.map(t=>t.symbol))],  [trades]);
-  const tfs    = useMemo(() => ["all",...new Set(trades.map(t=>t.timeframe))],[trades]);
-  const labels = useMemo(() => ["all",...new Set(trades.map(t=>t.label).filter(Boolean))],[trades]);
-
-  const filtered = useMemo(() => trades.filter(t=>{
-    if (filterPair!=="all"   && t.symbol!==filterPair)      return false;
-    if (filterTF!=="all"     && t.timeframe!==filterTF)     return false;
-    if (filterLabel!=="all"  && t.label!==filterLabel)      return false;
-    if (filterResult==="win" && !t.won)                     return false;
-    if (filterResult==="loss"&& t.won)                      return false;
-    return true;
-  }), [trades,filterPair,filterTF,filterLabel,filterResult]);
-
-  const stats = useMemo(() => {
-    if (!filtered.length) return null;
-    const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
-    const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
-    const wr=wins.length/filtered.length*100;
-    const avgWin=wins.length?wins.reduce((a,t)=>a+(t.pnl||0),0)/wins.length:0;
-    const avgLoss=losses.length?Math.abs(losses.reduce((a,t)=>a+(t.pnl||0),0)/losses.length):0;
-    const pf=avgLoss>0?avgWin/avgLoss:999;
-    let maxCW=0,maxCL=0,cw=0,cl=0;
-    [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
-    return {wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
-  }, [filtered]);
-
-  const equityCurve = useMemo(() => {
-    let eq = 100;
-    return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
-  }, [filtered]);
-
-  const pnlByPair = useMemo(() => {
-    const map={};
-    filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
-    return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
-  }, [filtered]);
-
-  const acc = account;
-  const totalReturn = acc ? Math.round(((acc.balance-100)/100*100)*100)/100 : 0;
-  const green = totalReturn >= 0;
-  const col   = green ? C.accent : C.red;
-  const sel2  = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
-
-  if (loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading journal...</div>;
-  if (error)   return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
-
-  return (
-    <div>
-      {/* Account banner */}
-      {acc ? (
-        <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>PAPER BALANCE</div>
-            <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(acc.balance)}</div>
-          </div>
-          <div style={{flex:1,minWidth:180}}>
-            <div style={{fontSize:13,marginBottom:4}}>Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
-            <div style={{fontSize:11,color:C.muted}}>{acc.total_trades} trades · {acc.wins}W / {acc.losses}L · Max DD -{fmt(acc.max_drawdown||0)}%</div>
-          </div>
-          <button onClick={load} style={{background:C.card,color:C.accent,border:`1px solid ${C.accent}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
-        </div>
-      ) : (
-        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No paper trades yet — waiting for first signal 🤖</div>
-      )}
-
-      {/* Filters */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:16}}>
-        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[
-            ["Pair",     filterPair,   setFilterPair,   pairs,  p=>p==="all"?"All Pairs":p],
-            ["TF",       filterTF,     setFilterTF,     tfs,    t=>t==="all"?"All TF":t.toUpperCase()],
-            ["Strategy", filterLabel,  setFilterLabel,  labels, l=>l==="all"?"All":l],
-            ["Result",   filterResult, setFilterResult, ["all","win","loss"], r=>r==="all"?"All":r==="win"?"Wins":"Losses"],
-          ].map(([label,val,setVal,opts,fmtOpt])=>(
-            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
-              <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
-              <select value={val} onChange={e=>setVal(e.target.value)} style={sel2}>
-                {opts.map(o=><option key={o} value={o}>{fmtOpt(o)}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Sub tabs */}
-      <div style={{display:"flex",gap:0,marginBottom:16,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
-        {[["overview","Overview"],["chart","Equity"],["breakdown","By Pair"],["trades","Trade Log"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{
-            flex:1,padding:"10px 4px",background:tab===id?C.card:"transparent",
-            color:tab===id?C.accent:C.muted,border:"none",
-            borderBottom:tab===id?`2px solid ${C.accent}`:"2px solid transparent",
-            fontSize:9,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {tab==="overview" && (
-        <div>
-          {!stats ? (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ) : (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-              <StatCard label="Total Trades"  value={stats.total}/>
-              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}  color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
-              <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
-              <StatCard label="Profit Factor" value={fmt(stats.pf)}        color={stats.pf>=1.5?C.accent:C.red}/>
-              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`}  color={C.accent}/>
-              <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
-              <StatCard label="Max Consec W"  value={stats.maxCW} color={C.accent}/>
-              <StatCard label="Max Consec L"  value={stats.maxCL} color={C.red}/>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab==="chart" && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Equity Curve · $100 Start</div>
-          {equityCurve.length>1 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
-                <defs><linearGradient id="jgrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={C.accent} stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor={C.accent} stopOpacity={0}/>
-                </linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                <XAxis dataKey="t" tickFormatter={t=>new Date(t).toLocaleDateString("en-MY",{month:"short",day:"numeric"})} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={44}/>
-                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                <ReferenceLine y={100} stroke={C.muted} strokeDasharray="4 4"/>
-                <Area type="monotone" dataKey="eq" stroke={C.accent} strokeWidth={2} fill="url(#jgrad)" dot={false}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
-          )}
-        </div>
-      )}
-
-      {tab==="breakdown" && (
-        <div>
-          {pnlByPair.length>0 && (
-            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-              <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={pnlByPair} margin={{top:4,right:4,left:0,bottom:0}}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                  <XAxis dataKey="name" tick={{fill:C.muted,fontSize:10}} tickLine={false} axisLine={false}/>
-                  <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
-                  <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                  <ReferenceLine y={0} stroke={C.muted}/>
-                  <Bar dataKey="value" radius={[3,3,0,0]} fill={C.accent}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          {filtered.length>0 && (
-            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-              <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>Stats by Pair + Strategy</div>
-              <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                  <thead><tr style={{background:C.bg}}>
-                    {["Pair","TF","Strategy","Trades","WR %","P&L","Avg Win","Avg Loss"].map(h=>(
-                      <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {(()=>{
-                      const groups={};
-                      filtered.forEach(t=>{const k=`${t.symbol}|${t.timeframe}|${t.label||"-"}`;if(!groups[k])groups[k]=[];groups[k].push(t);});
-                      return Object.entries(groups).map(([k,ts])=>{
-                        const [sym,tf,lbl]=k.split("|");
-                        const w=ts.filter(t=>t.won),l=ts.filter(t=>!t.won);
-                        const pnl=ts.reduce((a,t)=>a+(t.pnl||0),0);
-                        const aw=w.length?w.reduce((a,t)=>a+(t.pnl||0),0)/w.length:0;
-                        const al=l.length?Math.abs(l.reduce((a,t)=>a+(t.pnl||0),0)/l.length):0;
-                        const wr=w.length/ts.length*100;
-                        return (
-                          <tr key={k} style={{borderTop:`1px solid ${C.border}`}}>
-                            <td style={{padding:"6px 10px",fontWeight:700}}>{sym.replace("/USDT","")}</td>
-                            <td style={{padding:"6px 10px",color:C.muted}}>{tf.toUpperCase()}</td>
-                            <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{lbl}</td>
-                            <td style={{padding:"6px 10px"}}>{ts.length} ({w.length}W/{l.length}L)</td>
-                            <td style={{padding:"6px 10px",color:wr>=50?C.accent:C.red}}>{fmt(wr)}%</td>
-                            <td style={{padding:"6px 10px",color:pnl>=0?C.accent:C.red}}>{pnl>=0?"+":""}${fmt(pnl)}</td>
-                            <td style={{padding:"6px 10px",color:C.accent}}>${fmt(aw)}</td>
-                            <td style={{padding:"6px 10px",color:C.red}}>${fmt(al)}</td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab==="trades" && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
-          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-            Trade Log · {filtered.length} trades
-          </div>
-          {filtered.length===0 ? (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ) : (
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                <thead><tr style={{background:C.bg}}>
-                  {["Date","Pair","TF","Dir","Entry","Exit","RR","P&L","Balance","Strategy"].map(h=>(
-                    <th key={h} style={{padding:"7px 10px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {filtered.map((t,i)=>(
-                    <tr key={i} style={{borderTop:`1px solid ${C.border}`,background:t.won?"#00ff9d05":"#ff446605"}}>
-                      <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.created_at)}</td>
-                      <td style={{padding:"6px 10px",fontWeight:700}}>{(t.symbol||"").replace("/USDT","")}</td>
-                      <td style={{padding:"6px 10px",color:C.muted}}>{(t.timeframe||"").toUpperCase()}</td>
-                      <td style={{padding:"6px 10px"}}>
-                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700}}>{t.direction}</span>
-                      </td>
-                      <td style={{padding:"6px 10px"}}>{fmt(t.entry,4)}</td>
-                      <td style={{padding:"6px 10px"}}>{fmt(t.exit_price,4)}</td>
-                      <td style={{padding:"6px 10px",color:C.gold}}>{t.rr}R</td>
-                      <td style={{padding:"6px 10px",color:t.pnl>=0?C.accent:C.red,fontWeight:700}}>{t.pnl>=0?"+":""}${fmt(t.pnl)}</td>
-                      <td style={{padding:"6px 10px"}}>${fmt(t.balance)}</td>
-                      <td style={{padding:"6px 10px",color:C.gold,fontSize:9}}>{t.label||"—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── LIVE JOURNAL TAB ───────────────────────────────────────────
-function LiveJournalTab() {
-  const [account,      setAccount]      = useState(null);
-  const [trades,       setTrades]       = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState("");
-  const [filterPair,   setFilterPair]   = useState("all");
-  const [filterResult, setFilterResult] = useState("all");
-  const [tab,          setTab]          = useState("overview");
-
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
-    try {
-      const res  = await fetch(`${API}/live-journal`);
-      const data = await res.json();
-      if (data.success) {
-        setAccount(data.account||null);
-        setTrades(Array.isArray(data.trades)?data.trades:[]);
-      } else throw new Error(data.error||"Failed");
-    } catch(e) { setError(e.message); }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { load(); }, []);
-
-  const pairs = useMemo(() => ["all",...new Set(trades.map(t=>t.symbol))], [trades]);
-
-  const filtered = useMemo(() => trades.filter(t=>{
-    if (filterPair!=="all"   && t.symbol!==filterPair) return false;
-    if (filterResult==="win" && !t.won)                return false;
-    if (filterResult==="loss"&& t.won)                 return false;
-    return true;
-  }), [trades,filterPair,filterResult]);
-
-  const stats = useMemo(() => {
-    if (!filtered.length) return null;
-    const wins=filtered.filter(t=>t.won), losses=filtered.filter(t=>!t.won);
-    const totalPnl=filtered.reduce((a,t)=>a+(t.pnl||0),0);
-    const wr=wins.length/filtered.length*100;
-    const avgWin=wins.length?wins.reduce((a,t)=>a+(t.pnl||0),0)/wins.length:0;
-    const avgLoss=losses.length?Math.abs(losses.reduce((a,t)=>a+(t.pnl||0),0)/losses.length):0;
-    const pf=avgLoss>0?avgWin/avgLoss:999;
-    let maxCW=0,maxCL=0,cw=0,cl=0;
-    [...filtered].reverse().forEach(t=>{if(t.won){cw++;cl=0;maxCW=Math.max(maxCW,cw);}else{cl++;cw=0;maxCL=Math.max(maxCL,cl);}});
-    return {wins:wins.length,losses:losses.length,total:filtered.length,totalPnl,wr,avgWin,avgLoss,pf,maxCW,maxCL};
-  }, [filtered]);
-
-  const equityCurve = useMemo(() => {
-    if (!account) return [];
-    let eq = account.start_balance || 100;
-    return [...filtered].reverse().map(t=>{eq+=t.pnl||0;return{t:t.created_at,eq:Math.round(eq*100)/100};});
-  }, [filtered,account]);
-
-  const pnlByPair = useMemo(() => {
-    const map={};
-    filtered.forEach(t=>{if(!map[t.symbol])map[t.symbol]=0;map[t.symbol]+=(t.pnl||0);});
-    return Object.entries(map).map(([name,value])=>({name:name.replace("/USDT",""),value:Math.round(value*100)/100}));
-  }, [filtered]);
-
-  const startBal    = account?.start_balance || 100;
-  const totalReturn = account ? Math.round(((account.balance-startBal)/startBal*100)*100)/100 : 0;
-  const green = totalReturn >= 0;
-  const col   = green ? C.accent : C.red;
-  const sel2  = {background:C.card,color:C.text,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",fontSize:11,cursor:"pointer",outline:"none"};
-
-  if (loading) return <div style={{textAlign:"center",padding:"60px 0",color:C.muted,fontSize:12}}>⟳ Loading live journal...</div>;
-  if (error)   return <div style={{color:C.red,fontSize:12,padding:"20px",background:C.redDim,border:`1px solid ${C.red}`,borderRadius:8}}>✗ {error}</div>;
-
-  return (
-    <div>
-      {/* Live badge */}
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-        <div style={{width:8,height:8,borderRadius:"50%",background:C.red,boxShadow:`0 0 8px ${C.red}`}}/>
-        <span style={{fontSize:10,color:C.red,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700}}>Live Trading Account</span>
-      </div>
-
-      {/* Account banner */}
-      {account ? (
-        <div style={{background:green?C.accentDim:C.redDim,border:`1px solid ${col}`,borderRadius:12,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em"}}>LIVE BALANCE</div>
-            <div style={{fontSize:34,fontWeight:800,color:col,lineHeight:1}}>${fmt(account.balance)}</div>
-          </div>
-          <div style={{flex:1,minWidth:180}}>
-            <div style={{fontSize:13,marginBottom:4}}>Return: <strong style={{color:col}}>{green?"+":""}{fmt(totalReturn)}%</strong></div>
-            <div style={{fontSize:11,color:C.muted}}>{account.total_trades||0} trades · {account.wins||0}W / {account.losses||0}L · Max DD -{fmt(account.max_drawdown||0)}%</div>
-            <div style={{fontSize:10,color:C.muted,marginTop:2}}>Started: ${fmt(startBal)}</div>
-          </div>
-          <button onClick={load} style={{background:C.card,color:C.red,border:`1px solid ${C.red}`,borderRadius:8,padding:"8px 14px",fontSize:10,cursor:"pointer"}}>↻ Refresh</button>
-        </div>
-      ) : (
-        <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No live trades yet — bot not started 🤖</div>
-      )}
-
-      {/* Filters */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:16}}>
-        <div style={{fontSize:9,color:C.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>Filter Trades</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[
-            ["Pair",   filterPair,   setFilterPair,   pairs,              p=>p==="all"?"All Pairs":p],
-            ["Result", filterResult, setFilterResult, ["all","win","loss"],r=>r==="all"?"All":r==="win"?"Wins":"Losses"],
-          ].map(([label,val,setVal,opts,fmtOpt])=>(
-            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
-              <span style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{label}</span>
-              <select value={val} onChange={e=>setVal(e.target.value)} style={sel2}>
-                {opts.map(o=><option key={o} value={o}>{fmtOpt(o)}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Sub tabs */}
-      <div style={{display:"flex",gap:0,marginBottom:16,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
-        {[["overview","Overview"],["chart","Equity"],["breakdown","By Pair"],["trades","Trade Log"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{
-            flex:1,padding:"10px 4px",background:tab===id?C.card:"transparent",
-            color:tab===id?C.red:C.muted,border:"none",
-            borderBottom:tab===id?`2px solid ${C.red}`:"2px solid transparent",
-            fontSize:9,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {tab==="overview" && (
-        <div>
-          {!stats ? (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades match filters</div>
-          ) : (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
-              <StatCard label="Total Trades"  value={stats.total}/>
-              <StatCard label="Win Rate"      value={`${fmt(stats.wr)}%`}  color={stats.wr>=50?C.accent:C.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
-              <StatCard label="Total P&L"     value={`${stats.totalPnl>=0?"+":""}$${fmt(stats.totalPnl)}`} color={stats.totalPnl>=0?C.accent:C.red}/>
-              <StatCard label="Profit Factor" value={fmt(stats.pf)}        color={stats.pf>=1.5?C.accent:C.red}/>
-              <StatCard label="Avg Win $"     value={`$${fmt(stats.avgWin)}`}  color={C.accent}/>
-              <StatCard label="Avg Loss $"    value={`$${fmt(stats.avgLoss)}`} color={C.red}/>
-              <StatCard label="Max Consec W"  value={stats.maxCW} color={C.accent}/>
-              <StatCard label="Max Consec L"  value={stats.maxCL} color={C.red}/>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab==="chart" && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>Live Equity Curve</div>
-          {equityCurve.length>1 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={equityCurve} margin={{top:4,right:4,left:0,bottom:0}}>
-                <defs><linearGradient id="lgrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={col} stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor={col} stopOpacity={0}/>
-                </linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                <XAxis dataKey="t" tickFormatter={t=>new Date(t).toLocaleDateString("en-MY",{month:"short",day:"numeric"})} tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={48}/>
-                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                <ReferenceLine y={startBal} stroke={C.muted} strokeDasharray="4 4"/>
-                <Area type="monotone" dataKey="eq" stroke={col} strokeWidth={2} fill="url(#lgrad)" dot={false}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>Not enough trades yet</div>
-          )}
-        </div>
-      )}
-
-      {tab==="breakdown" && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>P&L by Pair</div>
-          {pnlByPair.length ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={pnlByPair} margin={{top:4,right:4,left:0,bottom:0}}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
-                <XAxis dataKey="name" tick={{fill:C.muted,fontSize:10}} tickLine={false} axisLine={false}/>
-                <YAxis tick={{fill:C.muted,fontSize:9}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`} width={44}/>
-                <Tooltip formatter={v=>`$${fmt(v)}`} contentStyle={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,fontSize:11}}/>
-                <ReferenceLine y={0} stroke={C.muted}/>
-                <Bar dataKey="value" radius={[3,3,0,0]} fill={C.red}/>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No data yet</div>
-          )}
-        </div>
-      )}
-
-      {tab==="trades" && (
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:40}}>
-          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase"}}>
-            Live Trade Log · {filtered.length} trades
-          </div>
-          {filtered.length ? (
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                <thead><tr style={{background:C.bg}}>
-                  {["#","Pair","Dir","Date","Entry","SL","TP","Exit","Result","P&L","Balance"].map(h=>(
-                    <th key={h} style={{padding:"7px 8px",color:C.muted,textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {filtered.map((t,i)=>(
-                    <tr key={i} style={{borderTop:`1px solid ${C.border}`}}>
-                      <td style={{padding:"6px 8px",color:C.muted}}>{t.id}</td>
-                      <td style={{padding:"6px 8px"}}>{(t.symbol||"").replace("/USDT","")}</td>
-                      <td style={{padding:"6px 8px"}}>
-                        <span style={{background:t.direction==="LONG"?C.accentDim:C.redDim,color:t.direction==="LONG"?C.accent:C.red,padding:"2px 5px",borderRadius:3,fontSize:8,fontWeight:700}}>{t.direction}</span>
-                      </td>
-                      <td style={{padding:"6px 8px",color:C.muted,whiteSpace:"nowrap"}}>{fmtDT(t.created_at)}</td>
-                      <td style={{padding:"6px 8px"}}>{fmt(t.entry_price,4)}</td>
-                      <td style={{padding:"6px 8px",color:C.red}}>{fmt(t.sl_price,4)}</td>
-                      <td style={{padding:"6px 8px",color:C.accent}}>{fmt(t.tp_price,4)}</td>
-                      <td style={{padding:"6px 8px"}}>{t.exit_price?fmt(t.exit_price,4):"—"}</td>
-                      <td style={{padding:"6px 8px",color:t.result==="TP"?C.accent:t.result==="SL"?C.red:C.muted,fontWeight:700}}>{t.result||"OPEN"}</td>
-                      <td style={{padding:"6px 8px",color:(t.pnl||0)>=0?C.accent:C.red}}>{(t.pnl||0)>=0?"+":""}${fmt(t.pnl||0)}</td>
-                      <td style={{padding:"6px 8px"}}>${fmt(t.balance_after||0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div style={{textAlign:"center",padding:"40px 0",color:C.muted,fontSize:12}}>No trades yet</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── MATRIX RUNNER TAB ─────────────────────────────────────────
-function MatrixRunnerTab() {
-  const [status,    setStatus]    = React.useState(null);
-  const [starting,  setStarting]  = React.useState(false);
-  const [prefetching,setPrefetching]=React.useState(false);
-  const [startMsg,  setStartMsg]  = React.useState("");
-  const [loading,   setLoading]   = React.useState(false);
-  const [tgLoading, setTgLoading] = React.useState(false);
-  const [csvData,   setCsvData]   = React.useState("");
-  const [tgMsg,     setTgMsg]     = React.useState("");
-  const [polling,   setPolling]   = React.useState(false);
-  const [filters,   setFilters]   = React.useState({min_return:0,min_sharpe:1,min_trades:30,max_dd:50});
+// ── RUNNER TAB ───────────────────────────────────────────────
+function RunnerTab() {
+  const [engine, setEngine] = React.useState("bos");
+  const [stage,  setStage]  = React.useState("sweep");
+  const [status, setStatus] = React.useState(null);
+  const [msg,    setMsg]    = React.useState("");
+  const [busy,   setBusy]   = React.useState(false);
 
   const fetchStatus = async () => {
     try {
-      const res  = await fetch(`${API}/matrix-status`);
-      const data = await res.json();
-      setStatus(data);
+      const res = await fetch(`${API}/matrix-status`);
+      setStatus(await res.json());
     } catch(e) {}
   };
 
-  React.useEffect(() => { fetchStatus(); }, []);
-  React.useEffect(() => {
-    if (!polling) return;
-    const iv = setInterval(fetchStatus, 5000);
-    return () => clearInterval(iv);
-  }, [polling]);
+  React.useEffect(() => { fetchStatus(); const iv=setInterval(fetchStatus,8000); return ()=>clearInterval(iv); }, []);
 
-  const startPrefetch = async () => {
-    setPrefetching(true); setStartMsg("");
+  const trigger = async () => {
+    setBusy(true); setMsg("");
     try {
-      const res  = await fetch(`${API}/prefetch-candles`, {method:"POST"});
+      const res = await fetch(`${API}/run-matrix?engine=${engine}&stage=${stage}`);
       const data = await res.json();
-      setStartMsg(data.message);
-      if (data.success) { setPolling(true); fetchStatus(); }
-    } catch(e) { setStartMsg("Error: "+e.message); }
-    setPrefetching(false);
+      setMsg(data.message || (data.success ? "Started" : "Failed"));
+      fetchStatus();
+    } catch(e) { setMsg("Error: "+e.message); }
+    setBusy(false);
   };
 
-  const startCompute = async () => {
-    setStarting(true); setStartMsg("");
+  const prefetch = async () => {
+    setBusy(true); setMsg("");
     try {
-      const res  = await fetch(`${API}/run-matrix`, {method:"POST"});
+      const res = await fetch(`${API}/prefetch-candles`, {method:"POST"});
       const data = await res.json();
-      setStartMsg(data.message);
-      if (data.success) { setPolling(true); fetchStatus(); }
-    } catch(e) { setStartMsg("Error: "+e.message); }
-    setStarting(false);
+      setMsg(data.message || "Prefetch started");
+      fetchStatus();
+    } catch(e) { setMsg("Error: "+e.message); }
+    setBusy(false);
   };
 
-  const downloadCSV = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        min_return: filters.min_return,
-        min_sharpe: filters.min_sharpe,
-        min_trades: filters.min_trades,
-        max_dd:     filters.max_dd,
-      });
-      const res = await fetch(`${API}/matrix-results/export?${params}`);
-      if (!res.ok) { setLoading(false); return; }
-      // Streaming response — get raw CSV text
-      const csv  = await res.text();
-      setCsvData(csv);
-      const blob = new Blob([csv], {type:"text/csv"});
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `waddle_matrix_${new Date().toISOString().split("T")[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch(e) { console.error(e); }
-    setLoading(false);
-  };
-
-  const phase     = status?.phase || "";
-  const isRunning = status?.is_running || false;
-  const isDone    = status?.status === "done" && !isRunning;
-  const pct       = status?.total > 0 ? Math.round((status.completed||0)/status.total*100) : 0;
-
-  const VARS = [
-    ["Pairs",      ["DOGE","XLM","XRP","ADA","TRX","ARB"]],
-    ["Timeframes", ["5m","15m","1h"]],
-    ["Engines",    ["BOS Pullback"]],
-    ["Entry Modes",["Rejection","Reclaim"]],
-    ["Pivot N",    [3,5,8]],
-    ["RR Ratios",  [1.5,2.0,3.0,4.0]],
-    ["Fib Levels", [0.382,0.5,0.618]],
-    ["EMA Pairs",  ["Off","34/55","55/89","89/144","144/169"]],
-    ["ADX Min",    ["Off(0)",15,25]],
-
-  ];
+  const isRunning = status?.is_running;
+  const pct = status?.total > 0 ? Math.round((status.completed||0)/status.total*100) : 0;
 
   return (
     <div>
-      {/* Status card */}
-      <div style={{background:C.surface,border:`1px solid ${isDone?C.accent:isRunning?C.gold:C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-          <div style={{width:8,height:8,borderRadius:"50%",
-            background:isDone?C.accent:isRunning?C.gold:C.muted,
-            boxShadow:isRunning?`0 0 8px ${C.gold}`:isDone?`0 0 8px ${C.accent}`:"none"}}/>
-          <span style={{fontSize:10,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700,
-            color:isDone?C.accent:isRunning?C.gold:C.muted}}>
-            {isDone?"Complete":isRunning?`Running — ${phase==="prefetch"?"Fetching Candles":"Computing"}`:
-             status?.status==="not_started"?"Not Started":"Idle"}
+      <div style={{background:C.surface,border:`1px solid ${isRunning?C.gold:C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:isRunning?C.gold:C.muted,boxShadow:isRunning?`0 0 8px ${C.gold}`:"none"}}/>
+          <span style={{fontSize:10,letterSpacing:"0.15em",textTransform:"uppercase",fontWeight:700,color:isRunning?C.gold:C.muted}}>
+            {isRunning ? "Running" : "Idle"}
           </span>
-          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          <button onClick={async()=>{
-            try{await fetch(`${API}/matrix-status/reset`,{method:"POST"});}catch(e){}
-            fetchStatus();
-          }} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,
-            padding:"3px 8px",color:C.muted,fontSize:10,cursor:"pointer"}}>🗑 Reset</button>
-          <button onClick={fetchStatus} style={{background:"transparent",
-            border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 8px",
-            color:C.muted,fontSize:10,cursor:"pointer"}}>↻</button>
         </div>
-        </div>
-
-        {status && status.total > 0 && (
-          <div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
-              <StatCard label="Done"    value={(status.completed||0).toLocaleString()} color={C.accent}/>
-              <StatCard label="Total"   value={(status.total||0).toLocaleString()}/>
-              <StatCard label="Progress" value={`${pct}%`} color={isDone?C.accent:C.gold}/>
-            </div>
-            <div style={{background:C.dim,borderRadius:4,height:8,marginBottom:8}}>
-              <div style={{background:isDone?C.accent:C.gold,height:8,borderRadius:4,
-                width:`${pct}%`,transition:"width 1s"}}/>
-            </div>
-            {status.detail && (
-              <div style={{fontSize:10,color:C.muted}}>
-                {phase==="prefetch"?"📥 Fetching:":"🔢 Computing:"} {status.detail}
-              </div>
-            )}
+        {status?.phase && <div style={{fontSize:11,color:C.text,marginBottom:8}}>{status.phase}</div>}
+        {status?.total > 0 && (
+          <div style={{background:C.dim,borderRadius:6,height:6,overflow:"hidden",marginBottom:6}}>
+            <div style={{width:`${pct}%`,height:"100%",background:C.gold,transition:"width 0.3s"}}/>
           </div>
         )}
-
-        {startMsg && <div style={{marginTop:10,fontSize:11,color:C.accent}}>{startMsg}</div>}
-
-        <div style={{display:"flex",gap:8,marginTop:12}}>
-          <button onClick={()=>setPolling(!polling)} style={{
-            flex:1,background:polling?C.goldDim:C.card,color:polling?C.gold:C.muted,
-            border:`1px solid ${polling?C.gold:C.border}`,borderRadius:6,
-            padding:"8px 12px",fontSize:10,cursor:"pointer"
-          }}>{polling?"⏸ Stop Refresh":"▶ Auto Refresh (5s)"}</button>
+        {status?.total > 0 && (
+          <div style={{fontSize:10,color:C.muted}}>{status.completed?.toLocaleString()} / {status.total?.toLocaleString()} ({pct}%)</div>
+        )}
+        <div style={{fontSize:9,color:C.muted,marginTop:8}}>
+          Full progress updates go to Telegram every ~10min — this panel is a quick check, not the source of truth.
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-        <button onClick={startPrefetch} disabled={prefetching||isRunning} style={{
-          background:prefetching||isRunning?C.dim:C.gold,color:C.bg,border:"none",
-          borderRadius:8,padding:12,fontSize:11,fontWeight:800,
-          cursor:prefetching||isRunning?"not-allowed":"pointer",letterSpacing:"0.06em"
-        }}>{prefetching?"⟳ Starting...":isRunning&&phase==="prefetch"?"⟳ Fetching...":"📥 PREFETCH CANDLES"}</button>
-        <button onClick={startCompute} disabled={starting||isRunning} style={{
-          background:starting||isRunning?C.dim:C.accent,color:C.bg,border:"none",
-          borderRadius:8,padding:12,fontSize:11,fontWeight:800,
-          cursor:starting||isRunning?"not-allowed":"pointer",letterSpacing:"0.06em"
-        }}>{starting?"⟳ Starting...":isRunning&&phase==="compute"?"⟳ Running...":"▶ RUN COMPUTATION"}</button>
-      </div>
-
-      {/* Variable space */}
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
-          Variables Being Tested
-          <span style={{marginLeft:8,color:C.accent,fontSize:11,fontWeight:700}}>
-            19,440 combos
-          </span>
-        </div>
-        {VARS.map(([label,vals])=>(
-          <div key={label} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,
-            paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>
-            <div style={{fontSize:9,color:C.muted,width:80,flexShrink:0,paddingTop:3,
-              textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-              {vals.map(v=>(
-                <span key={v} style={{background:C.card,border:`1px solid ${C.border}`,
-                  borderRadius:4,padding:"2px 7px",fontSize:10,color:C.text}}>{v}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-        <div style={{marginTop:8,fontSize:10,color:C.muted}}>
-          Period: 2025-01-01 → 2026-01-01 · Risk: Fixed 2% · Fees: Bybit notional
-        </div>
-      </div>
+        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10}}>Run Validation Funnel</div>
 
-      {/* Filter + Download */}
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16}}>
-        <div style={{fontSize:10,color:C.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>
-          Filter & Download CSV
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          {[
-            ["Min Return %","min_return",[0,10,20,50,100]],
-            ["Min Sharpe",  "min_sharpe",[0,1,2,3,4]],
-            ["Min Trades",  "min_trades",[0,20,30,50,100]],
-            ["Max DD %",    "max_dd",   [100,50,40,30,20]],
-          ].map(([label,key,opts])=>(
-            <div key={key}>
-              <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{label}</div>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {opts.map(v=>(
-                  <div key={v} onClick={()=>setFilters({...filters,[key]:v})} style={{
-                    background:filters[key]===v?C.accentDim:C.card,
-                    border:`1px solid ${filters[key]===v?C.accent:C.border}`,
-                    borderRadius:4,padding:"4px 8px",cursor:"pointer",
-                    fontSize:10,color:filters[key]===v?C.accent:C.text
-                  }}>{v}</div>
-                ))}
-              </div>
-            </div>
+        <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Engine</div>
+        <div style={{display:"flex",gap:6,marginBottom:12}}>
+          {["bos","ema","div","all"].map(e=>(
+            <button key={e} onClick={()=>setEngine(e)} style={{
+              flex:1,padding:"8px 4px",borderRadius:6,fontSize:10,fontWeight:700,textTransform:"uppercase",
+              background:engine===e?C.accentDim:"transparent",
+              color:engine===e?C.accent:C.muted,
+              border:`1px solid ${engine===e?C.accent:C.border}`,cursor:"pointer"
+            }}>{e}</button>
           ))}
         </div>
-        <div style={{fontSize:10,color:C.muted,marginBottom:8}}>
-          CSV includes: Pair · TF · Engine · Entry · N · RR · Fib · EMA · ADX ·
-          Return% · CAGR · MaxDD · Sharpe · PF · WR · Trades · Wins · Losses ·
-          AvgWin · AvgLoss · Kelly · Fees · Period
+
+        <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Stage</div>
+        <div style={{display:"flex",gap:6,marginBottom:14}}>
+          {[["sweep","1. Sweep"],["stability","2. Stability"],["monthly","3. Monthly"]].map(([s,label])=>(
+            <button key={s} onClick={()=>setStage(s)} style={{
+              flex:1,padding:"8px 4px",borderRadius:6,fontSize:10,fontWeight:700,
+              background:stage===s?C.goldDim:"transparent",
+              color:stage===s?C.gold:C.muted,
+              border:`1px solid ${stage===s?C.gold:C.border}`,cursor:"pointer"
+            }}>{label}</button>
+          ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <button onClick={downloadCSV} disabled={loading} style={{
-            background:loading?C.dim:C.accent,color:C.bg,border:"none",borderRadius:8,
-            padding:12,fontSize:12,fontWeight:800,
-            cursor:loading?"not-allowed":"pointer",letterSpacing:"0.06em"
-          }}>{loading?"⟳ Loading...":"⬇ FILTERED CSV"}</button>
-          <button onClick={async()=>{
-            setTgLoading(true); setTgMsg("Sending to Telegram...");
-            try {
-              const res = await fetch(`${API}/send-matrix-csv`,{method:"POST"});
-              const data = await res.json();
-              setTgMsg(data.success ? `✓ Sent ${data.rows} rows to Telegram` : `Error: ${data.error}`);
-            } catch(e){ setTgMsg("Error: "+e.message); }
-            setTgLoading(false);
-          }} disabled={tgLoading} style={{
-            background:tgLoading?C.dim:C.gold,color:C.bg,border:"none",borderRadius:8,
-            padding:12,fontSize:12,fontWeight:800,
-            cursor:tgLoading?"not-allowed":"pointer",letterSpacing:"0.06em"
-          }}>{tgLoading?"⟳ Sending...":"📨 SEND TO TELEGRAM"}</button>
+
+        <div style={{display:"flex",gap:8}}>
+          <Btn onClick={trigger} disabled={busy||isRunning} filled color={C.accent}>Run</Btn>
+          <Btn onClick={prefetch} disabled={busy||isRunning} color={C.gold}>Prefetch Candles</Btn>
         </div>
-        {csvData && (
-          <div style={{marginTop:8,fontSize:10,color:C.accent,textAlign:"center"}}>
-            ✓ Downloaded — check your downloads folder
-          </div>
-        )}
-        {tgMsg && (
-          <div style={{marginTop:8,fontSize:10,color:tgMsg.startsWith("Error")?C.red:C.accent,textAlign:"center"}}>
-            {tgMsg}
-          </div>
-        )}
+
+        {msg && <div style={{fontSize:10,color:C.muted,marginTop:10}}>{msg}</div>}
+      </div>
+
+      <div style={{fontSize:9,color:C.muted,lineHeight:1.6,padding:"0 4px"}}>
+        Stage 1 (Sweep) tests the full parameter space and only saves combos that pass the filter
+        (30+ trades, Sharpe 0.5–2.5, max drawdown ≤35%). Stage 2 (Stability) re-tests the locked
+        configs across 3 periods. Stage 3 (Monthly) checks 18 months of consistency. Results land
+        in Supabase — use the export/CSV-to-Telegram endpoints to pull them for review.
       </div>
     </div>
   );
 }
 
-// ── FABLE TAB ──────────────────────────────────────────────────
-// Pivot H/L structure indicator + Fib retracement pullback strategy
-// Long:  HL → HH leg, entry at fib retrace, SL at HL, TP = RR × risk
-// Short: LH → LL leg, entry at fib retrace, SL at LH, TP = RR × risk
+// ── PAPER TRADE TAB ──────────────────────────────────────────
+function PaperTab() {
+  const [data,  setData]  = React.useState(null);
+  const [byLabel, setByLabel] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
 
-// ── APP ────────────────────────────────────────────────────────
-function App() {
-  const [mainTab, setMainTab] = useState("single");
-  const tabs = [
-    ["single",   "Single",   C.accent],
-    ["runner",   "Runner",   C.gold],
-    ["prefetch", "Prefetch", C.gold],
-    ["journal",  "Paper",    C.blue],
-    ["live",     "Live",     C.red],
-  ];
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [j, bl] = await Promise.all([
+        fetch(`${API}/journal`).then(r=>r.json()),
+        fetch(`${API}/journal/by-label`).then(r=>r.json()),
+      ]);
+      setData(j); setByLabel(bl);
+    } catch(e) {}
+    setLoading(false);
+  };
+
+  React.useEffect(() => { load(); }, []);
+
+  if (loading) return <div style={{color:C.muted,fontSize:11,padding:20,textAlign:"center"}}>Loading…</div>;
+
+  const acc = data?.account;
+  const trades = data?.trades || [];
+  const labels = byLabel?.by_label || {};
 
   return (
-    <div style={{minHeight:"100vh",background:C.bg,color:C.text,padding:"20px 16px",maxWidth:900,margin:"0 auto"}}>
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em"}}>Paper Trading</span>
+        <Btn onClick={load} color={C.blue}>↻ Refresh</Btn>
+      </div>
+
+      {acc && (
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          <StatCard label="Balance" value={`$${acc.balance?.toFixed(2)}`} color={C.accent}/>
+          <StatCard label="Total PnL" value={`$${acc.total_pnl?.toFixed(2)}`} color={acc.total_pnl>=0?C.accent:C.red}/>
+          <StatCard label="Trades" value={acc.total_trades} sub={`${acc.wins}W / ${acc.losses}L`}/>
+          <StatCard label="Max DD" value={`${acc.max_drawdown?.toFixed(1)}%`} color={C.red}/>
+        </div>
+      )}
+
+      <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>By Config</div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+        {Object.keys(labels).length===0 && <div style={{padding:16,fontSize:11,color:C.muted,textAlign:"center"}}>No trades logged yet</div>}
+        {Object.entries(labels).map(([label,d],i)=>(
+          <div key={label} style={{padding:"10px 14px",borderTop:i>0?`1px solid ${C.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:11,color:C.text,fontWeight:600}}>{label}</div>
+              <div style={{fontSize:9,color:C.muted}}>{d.engine} · {d.trades} trades · {d.win_rate}% WR</div>
+            </div>
+            <div style={{fontSize:13,fontWeight:700,color:d.total_pnl>=0?C.accent:C.red}}>
+              {d.total_pnl>=0?"+":""}{d.total_pnl}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Recent Trades</div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {trades.length===0 && <div style={{padding:16,fontSize:11,color:C.muted,textAlign:"center"}}>No trades yet</div>}
+        {trades.slice(0,20).map((t,i)=>(
+          <div key={t.id||i} style={{padding:"8px 14px",borderTop:i>0?`1px solid ${C.border}`:"none",display:"flex",justifyContent:"space-between"}}>
+            <div style={{fontSize:10,color:C.text}}>{t.symbol} {t.timeframe} <span style={{color:C.muted}}>{t.direction}</span></div>
+            <div style={{fontSize:10,fontWeight:700,color:t.won?C.accent:C.red}}>{t.pnl>=0?"+":""}{t.pnl}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = React.useState("runner");
+  const tabs = [["runner","Runner",C.gold],["paper","Paper Trade",C.accent]];
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,padding:"20px 16px",maxWidth:600,margin:"0 auto"}}>
       <div style={{marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.accent,boxShadow:`0 0 8px ${C.accent}`}}/>
-          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v11</span>
+          <span style={{fontSize:10,color:C.accent,letterSpacing:"0.2em",textTransform:"uppercase"}}>Waddle Fib Engine v2.0</span>
         </div>
-        <h1 style={{fontSize:26,fontWeight:800,letterSpacing:"-0.03em"}}>BACKTEST <span style={{color:C.accent}}>LAB</span></h1>
-        <p style={{marginTop:4,fontSize:11,color:C.muted}}>XRP · DOGE · TRX · XLM · ADA · ARB · BOS Pullback · Rejection · Reclaim · 15M · 1H</p>
+        <h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-0.03em"}}>WADDLE</h1>
       </div>
 
-      {/* Scrollable tab bar */}
-      <div style={{overflowX:"auto",marginBottom:20,WebkitOverflowScrolling:"touch"}}>
-        <div style={{display:"flex",gap:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",minWidth:"max-content"}}>
-          {tabs.map(([id,label,color])=>(
-            <button key={id} onClick={()=>setMainTab(id)} style={{
-              padding:"10px 18px",
-              background:mainTab===id?C.card:"transparent",
-              color:mainTab===id?color:C.muted,
-              border:"none",
-              borderBottom:mainTab===id?`2px solid ${color}`:"2px solid transparent",
-              fontSize:11, fontWeight:mainTab===id?700:400,
-              cursor:"pointer", letterSpacing:"0.08em", textTransform:"uppercase",
-              whiteSpace:"nowrap", flexShrink:0
-            }}>{label}</button>
-          ))}
-        </div>
+      <div style={{display:"flex",gap:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:20}}>
+        {tabs.map(([id,label,color])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{
+            flex:1,padding:"12px 4px",
+            background:tab===id?C.card:"transparent",
+            color:tab===id?color:C.muted,
+            border:"none",
+            borderBottom:tab===id?`2px solid ${color}`:"2px solid transparent",
+            fontSize:11,fontWeight:tab===id?700:400,
+            cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"
+          }}>{label}</button>
+        ))}
       </div>
 
-      {mainTab==="single"   && <SingleTab/>}
-      {mainTab==="prefetch" && <PrefetchTab/>}
-      {mainTab==="runner"   && <MatrixRunnerTab/>}
-      {mainTab==="journal"  && <JournalTab/>}
-      {mainTab==="live"     && <LiveJournalTab/>}
+      {tab==="runner" && <RunnerTab/>}
+      {tab==="paper"  && <PaperTab/>}
     </div>
   );
 }
